@@ -1,7 +1,7 @@
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
 
 app = Flask(__name__)
@@ -9,47 +9,35 @@ app.secret_key = "dawson_tennis_admin_key_2026"
 
 # --- SETTINGS ---
 CSV_FILE = 'players.csv'
-SIGNUP_FILE = 'weekly_signups.csv'
-COURT_LIMIT = 24 
 
 def get_weather():
     try:
-        # Lafayette, CO Coordinates
-        url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&hourly=temperature_2m,precipitation_probability,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FDenver"
+        # Coordinates for Lafayette, CO
+        url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&hourly=temperature_2m,precipitation_probability&temperature_unit=fahrenheit&timezone=America%2FDenver"
         r = requests.get(url).json()
         
-        # Find the index for Saturday at 9:00 AM
+        # Hunt for the next Saturday at 9:00 AM
         times = r['hourly']['time']
-        saturday_9am = None
-        
         for i, t in enumerate(times):
-            # Look for the string that contains the date + 09:00
-            if "T09:00" in t:
-                # Check if this specific day is a Saturday (weekday 5)
-                dt = datetime.fromisoformat(t)
-                if dt.weekday() == 5: 
-                    saturday_9am = i
-                    break
-        
-        if saturday_9am is not None:
-            temp = r['hourly']['temperature_2m'][saturday_9am]
-            prob = r['hourly']['precipitation_probability'][saturday_9am]
-            wind = r['hourly']['wind_speed_10m'][saturday_9am]
-            return f"Sat 9AM: {temp}°F | {prob}% Precip | {wind}mph Wind"
-        else:
-            return "Saturday Forecast Pending..."
-    except Exception as e:
-        print(f"Weather error: {e}")
+            dt = datetime.fromisoformat(t)
+            # weekday() 5 is Saturday, hour 9 is 9 AM
+            if dt.weekday() == 5 and dt.hour == 9:
+                temp = r['hourly']['temperature_2m'][i]
+                prob = r['hourly']['precipitation_probability'][i]
+                return f"Sat 9AM: {temp}°F | {prob}% Rain"
+        return "Saturday forecast pending..."
+    except:
         return "Weather Service Offline"
 
 def load_players():
     return pd.read_csv(CSV_FILE, dtype={'id': str})
 
+def save_players(df):
+    df.to_csv(CSV_FILE, index=False)
+
 @app.route('/')
 def index():
     weather = get_weather()
-    # In a real scenario, we'd load signups from a second CSV
-    # For now, let's just show the interface is ready
     return render_template('index.html', weather=weather)
 
 @app.route('/login', methods=['POST'])
@@ -63,15 +51,28 @@ def login():
         return redirect(url_for('index'))
     
     user_data = user.iloc[0]
-    # Check if this is YOU (jpiccolini)
     is_admin = (user_data['id'] == '0001')
-    
     return render_template('dashboard.html', user=user_data, is_admin=is_admin)
 
-@app.route('/admin_panel')
-def admin_panel():
-    # Only reachable if you are logged in as 0001
-    return "<h1>Admin: Change Start Time / Limit Courts / Put on Hold</h1>"
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    user_id = request.form.get('id')
+    players = load_players()
+    
+    # Update the row where ID matches
+    mask = players['id'] == user_id
+    if mask.any():
+        players.loc[mask, 'first'] = request.form.get('first')
+        players.loc[mask, 'last'] = request.form.get('last')
+        players.loc[mask, 'email'] = request.form.get('email')
+        players.loc[mask, 'backup_email'] = request.form.get('backup_email')
+        players.loc[mask, 'cell'] = request.form.get('cell')
+        save_players(players)
+        flash("Profile updated successfully!")
+    
+    # After saving, we need to show the dashboard again
+    user_data = players[players['id'] == user_id].iloc[0]
+    return render_template('dashboard.html', user=user_data, is_admin=(user_id == '0001'))
 
 if __name__ == "__main__":
     app.run()
