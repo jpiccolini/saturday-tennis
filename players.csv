@@ -1,0 +1,99 @@
+id,last,first,email,cell,backup_email,is_admin
+0001,Piccolini,Jim,jpiccolini@dawsonschool.org,720-470-0214,jpiccolini@mac.com,TRUE
+0002,Angelopoulos ,George ,g.angelopoulos88@gmail.com,954-593-6440,,FALSE
+0003,Barone ,Justine,justerbink@gmail.com,720-234-0095,,FALSE
+0004,Bartley,Josh,jtb.1384@gmail.com,303-809-6962,,FALSE
+0005,Baur,Dan,danieljbaur@gmail.com,303-995-6132,,FALSE
+0006,Bernstein,Ben,bcb615@gmail.com,720-771-3324,,FALSE
+0007,Billings,Paul,paul@arion.ws,808-298-9090,,FALSE
+0008,Blanco,Monica,moniblanco.d@gmail.com,720-698-5859,,FALSE
+0009,Bonthius,Christine,cmbonthius@gmail.com,512-820-7436,,FALSE
+0010,Brenner,Jahnavi ,jahnavi@gmail.com,303-249-0700,,FALSE
+0011,Brown,Dave,dhbrown333@gmail.com,720-833-8611,,FALSE
+0012,Brown,Holly,hsbrown3@comcast.net,720-833-8849,,FALSE
+0013,Cariov,Ruta,Ruta.cariov@gmail.com,773-316-9823,,FALSE
+0014,Cole,Lizzy,lizzydcole@gmail.com,216-410-7058,,FALSE
+0015,Crouse,Susan,susan@sckart.com,303-249-5561,,FALSE
+0016,Dahlstrom,Megan,megandahlstrom@gmail.com,817-228-2999,,FALSE
+0017,Dana,Polly,polly@danasd.com,303 725 2127,,FALSE
+0018,Davies,Ceri,CeriDavies@Hotmail.com,303-870-6743,,FALSE
+0019,Der,Hayley,Hayley.young.der@gmail.com,303-241-9085,,FALSE
+0020,Downey,Sarah,sdowney@twotumbleweeds.co,708-261-7216,,FALSE
+0021,Edwards,Kevin,kmedwards622@gmail.com,480-363-1272,,FALSE
+0022,Esborg,Erik,Erikesborg@gmail.com,303-907-3121,,FALSE
+0023,Fan,Miranda,miranda.fanster@gmail.com,617-233-7923,,FALSE
+0024,Fedorka,Sara,sfedorka@yahoo.com,330-936-9523,,FALSE
+0025,Fields,Ashley,ashley.fields@rocketmail.com,432-234-8465,,FALSE
+0026,Finkelstein,Ari,ariben@gmail.com,650-380-9955,,FALSE
+0027,Firstenberg,Ann,annfirstenberg@gmail.com,303-926-9406,,FALSE
+0028,Franko,Paul,pauljfranko@gmail.com,303.522.6037,,FALSE
+0029,Gambrell ,Bill,weilflwr@comcast.net,303-709-2881,,FALSE
+0030,Haigis,Brad,bradhaigis@gmail.com,978-394-6467,,FALSE
+0031,Hand,Jeremy,Hand_Jeremy@yahoo.com,404-550-2937,,FALSE
+0032,Hartigan,Maureen,mhartigan7@gmail.com,303-775-1824,,FALSE
+0033,Harvey,Bekah,bekah@alumni.utexas.net,303-885-5030,,FALSE
+0034,Hassan,Shannon,shannonhassan1@gmail.com,303-619-3681,,FALSE
+0035,Horace,Steve,shorace1@gmail.com,303-905-9783,,FALSE
+0036,Hoving,Cara,Choving@gmail.com,303-579-1676,,FALSE
+0037,Howe,Shaun,Shaun845@gmail.com,303 905 7524,,FALSE
+0038,Jensen,Mary,Mbbjensen03@gmail.com,303-827-1131,,FALSE
+0039,Johnson,Everett,everetthopejohnson@gmail.com,480-370-0570,,FALSE
+0040,Kelsey,Chip,Chip@ckfotos.com,720-244-3956,,FALSE
+0041,Kilgore,Richard,rkilgore@maryville.edu,314-795-5552,,FALSE
+0042,Killion,Lindsey,Lindseymkillion@gmail.com,630-728-3058,,FALSE
+0043,Kinney,Ryan,ryan.kinney@gmail.com,970-214-6860,,FALSE
+0044,Kristjanson ,John,Johnkristjanson@gmail.com,303-330-2280,,FALSE
+0045,Krizek,Kevin,Kjkrizek@gmail.com,720-822-5172,,FALSE
+0046,LaMountain,Ryan,ryanlamountain@me.com,214-392-1307,,FALSE
+0047,Latsko,Jim,Slats2003@gmail.com,303-903-6525,,FALSE
+0048,Levinson,Marc,marcllevinson@gmail.com,303-250-3338,,FALSE
+0049,Lilleston,Scott,scottlilleston@hotmail.com,303-579-3166,,FALSE
+0050,Longenecker,Steve,steven.n.longenecker@gmail.com,720-600-9513,,FALSE
+0051,Loof,Eric,emloof@gmail.com,303-819-4655,,FALSE
+0052,Mansour,Connie,conniethecarpenter@gmail.com ,303-415-1916,,FALSE
+0053,Majors,Travis ,travismajors@gmail.com,303-887-1894,,FALSE
+0054,Martin,Shea,sheany@gmail.com,917-903-2795,,FALSE
+0055,Martinez,Eduardo,eduardoboulder@gmail.com,720-207-3901,,FALSE
+0056,McLaughlin,Clay,cmmclaugh@comcast.net,312-636-0602,,FALSE
+0057,Mejia,"Olimpia ""Oli""",Olimpia.mejia@gmail.com,720.369.3442,,FALSE
+0058,Mikle,Paul,pmikle@me.com,303-523-0772,,FALSE
+0059,Noelle,Kirstin,kirstinnoelle89@gmail.com,720-936-8948,,FALSE
+0060,Ohlsen,Dan,danohlsen24@gmail.com,303-818-0424,,FALSE
+0061,Ohlsen,Steph,danstepho@msn.com,303-818-1477,,FALSE
+0062,Ostlund,Salme,Salme.ostlund@gmail.com,720-930-5488,,FALSE
+0063,Otto,Eric,eric.s.otto@gmail.com,303-917-4693,,FALSE
+0064,Paiss,Halonah,Hpaiss29@gmail.com,720-612-9215,,FALSE
+0065,Peltier,Tara,tarapeltier@gmail.com,303-449-0282,,FALSE
+0066,Piccolini,Jim,jpiccolini@dawsonschool.org,720-470-0214,,FALSE
+0067,Pieper,Emily,Emily.donaldson@gmail.com,412-965-0454,,FALSE
+0068,Reenan,Jody,jreenan@gmail.com,720-684-9264,,FALSE
+0069,Reester,Adele,areester@lyonsgaddis.com,303-532-7119,,FALSE
+0070,Richards,Tsugumi,tsuguran@gmail.com,720-224-2237,,FALSE
+0071,Richardson,Alex,alexricha14@gmail.com,352-281-5634,,FALSE
+0072,Rodanski,Jeff,jeffrodanski@gmail.com,720-839-7513,,FALSE
+0073,Schaefer,Jim,james.c.schaefer@gmail.com,216-470-9880,,FALSE
+0074,Schoenfeld,Julie,schoenfeldjulie@hotmail.com,303 588-3530,,FALSE
+0075,Schulte,Lynn,lynnschultept@gmail.com,303-845-0604,,FALSE
+0076,Schutter ,Linda ,Lmschutter@gmail.com,720-318-4099,,FALSE
+0077,Schwarzburg,Irina,ischwarzburg@hotmail.com,720-877-7724,,FALSE
+0078,Scipione,Wendy,wscipione@hotmail.com,303-619-2958,,FALSE
+0079,Sherman,Geoffrey,gg.sherman@gmail.com,239-770-2887,,FALSE
+0080,Simon,Claire,csimonny@gmail.com,917-603-9178,,FALSE
+0081,Sink,Tolley,tolleysink@gmail.com,303-775-1456,,FALSE
+0082,Smith,Heather,heatherasmith003@gmail.com,917-623-9470,,FALSE
+0083,Strinka,Jimmy,Jstrinka@yahoo.com,720-300-3307,,FALSE
+0084,Sufrin,Alexandra,alexandrasufrin@gmail.com,410-218-0381,,FALSE
+0085,Sunderland,Tom,tom@nativeedgelandscapes.com,303-618-7405,,FALSE
+0086,Sweat,John,john.w.sweat@gmail.com,601-918-5539,,FALSE
+0087,Swift,Samuel,samdswift@gmail.com,706-814-4430,,FALSE
+0088,Taylor,Anita,anitaRtaylor@gmail.com,303-378-6975,,FALSE
+0089,Thompson,Dominic,dominicthompson@gmail.com,303-881-2565,,FALSE
+0090,Todd,Bob,btodd520@gmail.com,303-435-0470,,FALSE
+0091,Tran,Joel,joel.tran1@gmail.com,617-633-2411,,FALSE
+0092,Tran,Mary,maryetran@gmail.com,617-633-2409,,FALSE
+0093,Vandenberghe,Francois,fcvandenberghe@gmail.com,303-641-3005,,FALSE
+0094,Walker,Jim,james.maclean.walker@gmail.com,720-219-8424,,FALSE
+0095,Wallace,Jenny,jennywallace8@gmail.com,720-326-9064,,FALSE
+0096,Walsh,Bryce,bryce@brycewalsh.com,773-218-9207,,FALSE
+0097,Win,Dewi,dewiswin@gmail.com,978-609-1157,,FALSE
+,Zwicky,Christina,christinajzwicky@gmail.com,720-346-1448,,FALSE
