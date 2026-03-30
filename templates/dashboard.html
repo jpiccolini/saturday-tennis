@@ -1,50 +1,36 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Player Dashboard</title>
+    <title>Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: sans-serif; background: #121212; color: white; padding: 20px; display: flex; justify-content: center; }
         .container { background: #1e1e1e; padding: 30px; border-radius: 12px; width: 100%; max-width: 400px; border: 1px solid #333; }
-        .alert { padding: 12px; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
-        .success { background: #2e7d32; color: white; }
-        .error { background: #d32f2f; color: white; }
-        input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: white; box-sizing: border-box; font-size: 16px; }
-        label { color: #888; font-size: 0.9em; margin-top: 10px; display: block; }
-        button { width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 1em; margin-top: 15px; }
-        .back { display: block; text-align: center; margin-top: 25px; color: #888; text-decoration: none; font-size: 0.9em; }
-        .admin-badge { background: #ff9800; color: black; padding: 3px 8px; border-radius: 4px; font-size: 0.7em; margin-left: 10px; vertical-align: middle; text-transform: uppercase; }
+        .admin-link { display: block; background: #ff9800; color: black; text-align: center; padding: 10px; border-radius: 6px; text-decoration: none; font-weight: bold; margin-bottom: 20px; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: white; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .back { display: block; text-align: center; margin-top: 20px; color: #888; text-decoration: none; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h2>Hello, {{ user.first }}! {% if is_admin %}<span class="admin-badge">Admin</span>{% endif %}</h2>
-    <p style="color: #888; margin-bottom: 25px;">Update your contact info for the weekly roster.</p>
+    {% if is_admin %}
+        <a href="/admin_panel" class="admin-link">⚠️ ENTER MASTER ADMIN PANEL</a>
+    {% endif %}
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="alert {{ category }}">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+    <h2>Hello, {{ user.first }}!</h2>
 
     <form action="/update_profile" method="POST">
         <input type="hidden" name="id" value="{{ user.id }}">
-        
-        <label>Primary Email</label>
-        <input type="email" name="email" value="{{ user.email }}" required>
-        
-        <label>Backup Email (Optional)</label>
+        <label>Email</label>
+        <input type="email" name="email" value="{{ user.email }}">
+        <label>Backup Email</label>
         <input type="email" name="backup_email" value="{{ user.backup_email }}">
-        
-        <label>Cell Phone</label>
+        <label>Cell</label>
         <input type="text" name="cell" value="{{ user.cell }}">
-        
         <button type="submit">Save Changes</button>
     </form>
-    
-    <a href="/" class="back">← Back to Home Page</a>
+    <a href="/" class="back">← Back to Home</a>
 </div>
 </body>
 </html>
