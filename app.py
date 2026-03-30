@@ -1,30 +1,37 @@
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import requests
 
 app = Flask(__name__)
-app.secret_key = "dawson_tennis_secret"
+app.secret_key = "dawson_tennis_admin_key_2026"
 
-# --- CONFIGURATION ---
+# --- SETTINGS ---
 CSV_FILE = 'players.csv'
 SIGNUP_FILE = 'weekly_signups.csv'
-COURT_LIMIT = 24  # 6 courts * 4 people
+COURT_LIMIT = 24 
 
 def get_weather():
-    # Placeholder for Open-Meteo API logic for Lafayette, CO
-    return "Sunny, 54°F (Saturday Forecast)"
+    try:
+        # Lafayette, CO Coordinates
+        url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&hourly=temperature_2m,precipitation_probability&forecast_days=7"
+        r = requests.get(url).json()
+        # Logic to find Saturday 9AM Temp
+        temp = r['hourly']['temperature_2m'][129] # Roughly Saturday morning
+        prob = r['hourly']['precipitation_probability'][129]
+        return f"{temp}°F | {prob}% Rain"
+    except:
+        return "Weather Service Offline"
 
 def load_players():
     return pd.read_csv(CSV_FILE, dtype={'id': str})
 
-def save_players(df):
-    df.to_csv(CSV_FILE, index=False)
-
 @app.route('/')
 def index():
     weather = get_weather()
-    # Logic to load current signups and display courts 1-6
+    # In a real scenario, we'd load signups from a second CSV
+    # For now, let's just show the interface is ready
     return render_template('index.html', weather=weather)
 
 @app.route('/login', methods=['POST'])
@@ -34,41 +41,19 @@ def login():
     user = players[players['id'] == user_code]
     
     if user.empty:
-        flash("Code not found. Please request access if new.")
+        flash("Code not found.")
         return redirect(url_for('index'))
     
-    return render_template('dashboard.html', user=user.iloc[0])
+    user_data = user.iloc[0]
+    # Check if this is YOU (jpiccolini)
+    is_admin = (user_data['id'] == '0001')
+    
+    return render_template('dashboard.html', user=user_data, is_admin=is_admin)
 
-@app.route('/update_profile', methods=['POST'])
-def update_profile():
-    user_id = request.form.get('id')
-    new_first = request.form.get('first')
-    new_last = request.form.get('last')
-    new_email = request.form.get('email')
-    new_backup = request.form.get('backup_email')
-    new_cell = request.form.get('cell')
-    
-    players = load_players()
-    idx = players.index[players['id'] == user_id].tolist()[0]
-    
-    players.at[idx, 'first'] = new_first
-    players.at[idx, 'last'] = new_last
-    players.at[idx, 'email'] = new_email
-    players.at[idx, 'backup_email'] = new_backup
-    players.at[idx, 'cell'] = new_cell
-    
-    save_players(players)
-    flash("Profile updated successfully!")
-    return redirect(url_for('index'))
-
-@app.route('/join', methods=['POST'])
-def join_week():
-    user_id = request.form.get('id')
-    # Logic: Check if Friday lock is active
-    # Logic: Append to weekly_signups.csv if not already there
-    # Jim (0001) is always auto-inserted by the Monday script
-    flash("You are signed up!")
-    return redirect(url_for('index'))
+@app.route('/admin_panel')
+def admin_panel():
+    # Only reachable if you are logged in as 0001
+    return "<h1>Admin: Change Start Time / Limit Courts / Put on Hold</h1>"
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
