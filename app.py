@@ -1,8 +1,7 @@
-
 import os
 import requests
 import re
-from flask import Flask, render_template, request, jsonify, session, flash, redirect, url_for
+from flask import Flask, render_template, request, session, flash, redirect, url_for
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -13,12 +12,14 @@ GAS_URL = "https://script.google.com/macros/s/AKfycbyCzNjCIIkWhJlwU-LlOCq1bZhg-B
 ADMIN_PASSWORD = "jujubeE2" 
 
 def get_next_saturday():
+    """Calculates the date of the upcoming Saturday."""
     today = datetime.now()
     days_ahead = (5 - today.weekday() + 7) % 7
     if days_ahead == 0: days_ahead = 7
-    return (today + timedelta(days_ahead)).strftime('%Y-%m-%d')
+    return (today + timedelta(days_ahead)).strftime('%b %d, %Y') # Formats as 'Apr 04, 2026'
 
 def get_weather_forecast(time_str):
+    """Fetches weather for the specific hour."""
     print("-> Fetching Weather...")
     try:
         match = re.search(r'(\d+)', str(time_str))
@@ -43,7 +44,12 @@ def index():
     print("-> Fetching Schedule from Google...")
     try:
         sched_resp = requests.get(f"{GAS_URL}?action=getSchedule", timeout=4).json()
-        display_start = sched_resp.get('startTime', '8:45 AM')
+        raw_time = sched_resp.get('startTime', '8:45 AM')
+        
+        # Extract ONLY the time (e.g., "8:45 AM"), destroying the 1899 date string
+        time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', str(raw_time), re.IGNORECASE)
+        display_start = time_match.group(1).upper() if time_match else "8:45 AM"
+        print(f"-> Time parsed successfully: {display_start}")
     except Exception as e:
         print(f"-> Schedule fetch failed: {e}")
         display_start = "8:45 AM"
@@ -81,7 +87,8 @@ def validate():
         print(f"-> Google Script response: {data}")
 
         if data.get('found'):
-            if str(code) == "0001":
+            # CHANGED TO 9999
+            if str(code) == "9999":
                 if password == ADMIN_PASSWORD:
                     print("-> Admin Login SUCCESS")
                     session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': True}
@@ -105,9 +112,15 @@ def validate():
 
 @app.route('/signup', methods=['POST'])
 def signup():
-    if 'user' not in session: return redirect(url_for('index'))
+    if 'user' not in session: 
+        return redirect(url_for('index'))
     try:
-        requests.post(GAS_URL, json={"action": "signup", "date": get_next_saturday(), "first": session['user']['first'], "last": session['user']['last']}, timeout=5)
+        requests.post(GAS_URL, json={
+            "action": "signup", 
+            "date": get_next_saturday(), 
+            "first": session['user']['first'], 
+            "last": session['user']['last']
+        }, timeout=5)
         flash("Successfully signed up!", "success")
     except:
         flash("Signup failed.", "error")
@@ -115,9 +128,13 @@ def signup():
 
 @app.route('/update_time', methods=['POST'])
 def update_time():
-    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    if not session.get('user', {}).get('is_admin'): 
+        return redirect(url_for('index'))
     try:
-        requests.post(GAS_URL, json={"action": "updateSchedule", "hour": request.form.get('time_string')}, timeout=5)
+        requests.post(GAS_URL, json={
+            "action": "updateSchedule", 
+            "hour": request.form.get('time_string')
+        }, timeout=5)
         flash("Start time updated!", "success")
     except:
         flash("Failed to update.", "error")
@@ -128,7 +145,7 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-
 if __name__ == '__main__':
+    # Binds to Render's required PORT environment variable
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
