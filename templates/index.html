@@ -36,7 +36,7 @@
         {% if not session.get('user') %}
             <h3>Player Access</h3>
             <form action="/validate" method="POST">
-                <input type="text" id="codeField" name="code" placeholder="4-digit Player Code" oninput="checkAdmin()" required autocomplete="off">
+                <input type="text" id="codeField" name="code" oninput="checkAdmin()" placeholder="Enter your 4-digit code" required>
                 
                 <div id="passwordArea" class="hidden">
                     <p style="color: #FFD700; font-size: 0.85em; margin: 10px 0 5px;">Admin Mode Active</p>
