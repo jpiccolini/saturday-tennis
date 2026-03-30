@@ -6,7 +6,7 @@ app = Flask(__name__)
 app.secret_key = "tennis_roster_secure_key" # Keeps your session data safe
 
 # Use your provided deployment URL
-GAS_URL = "https://script.google.com/macros/s/AKfycbwgbY1HG6hCDdx6xA5ACwc4snKp9WFwMeuymipJG78AlfZU_QfjeN9tYDq--RaHFSzQ9w/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbxho8NgMSpmKA8afOw43TBsgx46EO79_okFu1H9t76mES2ZSrNBddcCydTXtktQjX2stQ/exec"
 
 def get_next_saturday():
     """Calculates the date of the upcoming Saturday."""
