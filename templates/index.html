@@ -5,31 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
-        .weather { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 20px; color: #4CAF50; border: 1px solid #333; font-size: 1.1em; }
         .box { background: #1e1e1e; padding: 25px; border-radius: 15px; max-width: 400px; margin: 0 auto 20px; border: 1px solid #333; }
         input { padding: 12px; border-radius: 5px; border: 1px solid #444; background: #222; color: white; width: 85%; margin-bottom: 12px; font-size: 16px; box-sizing: border-box; }
-        button { padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 85%; margin-top: 10px; transition: 0.3s; }
-        button:hover { background: #45a049; }
+        button { padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 85%; margin-top: 10px; }
+        .hidden { display: none; }
         .admin-box { border: 2px dashed #FFD700; padding: 15px; margin-top: 20px; border-radius: 10px; background: #252525; }
-        .admin-btn { background: #FFD700; color: black; }
-        .admin-btn:hover { background: #e6c200; }
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 8px; font-weight: bold; max-width: 400px; margin: 10px auto; }
         .success { background: #2e7d32; color: white; }
         .error { background: #d32f2f; color: white; }
-        .roster-box { background: #1e1e1e; padding: 20px; border-radius: 15px; max-width: 400px; margin: 0 auto; border: 1px solid #333; text-align: left; }
-        .roster-list { padding-left: 20px; color: #4CAF50; font-size: 1.1em; line-height: 1.6; }
-        .date-badge { color: #888; font-size: 0.8em; margin-left: 10px; }
-        .logout-link { color: #888; text-decoration: none; font-size: 0.85em; display: block; margin-top: 15px; }
+        .request-link { color: #888; font-size: 0.85em; text-decoration: underline; cursor: pointer; display: block; margin-top: 15px; }
     </style>
 </head>
 <body>
 
     <h1>🎾 Dawson Tennis Gang</h1>
-    <p style="color: #888;">Lafayette, CO | <strong>Start Time: {{ start_time }}</strong></p>
-    
-    <div class="weather">
-        <strong>{{ weather }}</strong>
-    </div>
+    <p style="color: #888;">Lafayette, CO | Start Time: {{ start_time }}</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -43,47 +33,51 @@
         {% if not session.get('user') %}
             <h3>Player Access</h3>
             <form action="/validate" method="POST">
-                <input type="text" name="code" placeholder="4-digit Player Code" required>
-                <input type="password" name="password" placeholder="Admin Password (Only for 0001)">
+                <input type="text" id="codeField" name="code" placeholder="4-digit Code" oninput="checkAdmin()" required>
+                
+                <div id="passwordArea" class="hidden">
+                    <p style="color: #FFD700; font-size: 0.8em; margin: 5px 0;">Admin Detected: Enter Password</p>
+                    <input type="password" name="password" placeholder="Admin Password">
+                </div>
+                
                 <button type="submit">Verify & Enter</button>
             </form>
-            <p style="color: #666; font-size: 0.8em; margin-top: 10px;">Codes are found in the Master List tab.</p>
+            
+            <a href="mailto:admin@example.com?subject=Tennis Account Request" class="request-link">Not on the list? Request an account</a>
 
         {% else %}
-            <h3>Welcome, {{ session['user']['first'] }}!</h3>
-            <p style="color: #4CAF50;">Confirming for: <strong>Saturday, {{ target_date }}</strong></p>
-            
+            <h3>Hi, {{ session['user']['first'] }}!</h3>
             <form action="/signup" method="POST">
-                <button type="submit">Sign Me Up for This Saturday</button>
+                <button type="submit">Sign Me Up for Sat, {{ target_date }}</button>
             </form>
 
             {% if session['user']['is_admin'] %}
                 <div class="admin-box">
-                    <h4 style="color: #FFD700; margin-top: 0;">Admin Dashboard</h4>
+                    <h4 style="color: #FFD700;">Admin Dashboard</h4>
                     <form action="/update_time" method="POST">
-                        <label style="font-size: 0.85em; display: block; margin-bottom: 5px;">Set New Start Time:</label>
-                        <input type="text" name="time_string" placeholder="e.g., 9:15 AM" required>
-                        <button type="submit" class="admin-btn">Update Global Start Time</button>
+                        <input type="text" name="time_string" placeholder="New Time (e.g. 10:15 AM)" required>
+                        <button type="submit" style="background: #FFD700; color: black;">Update Roster Time</button>
                     </form>
                 </div>
             {% endif %}
 
-            <a href="/logout" class="logout-link">← Logout / Switch Player</a>
+            <a href="/logout" style="color: #888; display: block; margin-top: 15px; text-decoration: none; font-size: 0.8em;">Logout / Switch User</a>
         {% endif %}
     </div>
 
-    <div class="roster-box">
-        <h3 style="text-align: center; margin-top: 0; color: #4CAF50;">Current Roster</h3>
-        {% if roster %}
-            <ol class="roster-list">
-            {% for player in roster %}
-                <li>{{ player.name }} <span class="date-badge">({{ player.date }})</span></li>
-            {% endfor %}
-            </ol>
-        {% else %}
-            <p style="text-align: center; color: #666;">No signups yet for this Saturday.</p>
-        {% endif %}
-    </div>
+    <script>
+        function checkAdmin() {
+            const codeInput = document.getElementById('codeField').value;
+            const passwordArea = document.getElementById('passwordArea');
+            
+            // If the user types 0001, show the password field. Otherwise, hide it.
+            if (codeInput === "0001") {
+                passwordArea.classList.remove('hidden');
+            } else {
+                passwordArea.classList.add('hidden');
+            }
+        }
+    </script>
 
 </body>
 </html>
