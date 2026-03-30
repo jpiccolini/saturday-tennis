@@ -14,19 +14,18 @@ def get_weather():
         url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&hourly=temperature_2m,precipitation_probability&temperature_unit=fahrenheit&timezone=America%2FDenver"
         r = requests.get(url).json()
         times = r['hourly']['time']
-        start_weather, end_weather = None, None
+        start_w, end_w = None, None
         
         for i, t in enumerate(times):
             dt = datetime.fromisoformat(t)
-            # Find Saturday (weekday 5)
-            if dt.weekday() == 5:
+            if dt.weekday() == 5: # Saturday
                 if dt.hour == 9:
-                    start_weather = f"9AM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
+                    start_w = f"9AM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
                 if dt.hour == 12:
-                    end_weather = f"12PM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
+                    end_w = f"12PM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
         
-        if start_weather and end_weather:
-            return f"Sat Forecast | {start_weather} ⮕ {end_weather}"
+        if start_w and end_w:
+            return f"Sat Forecast | {start_w} ⮕ {end_w}"
         return "Saturday Forecast Pending..."
     except:
         return "Weather Service Offline"
@@ -44,13 +43,22 @@ def login():
     players = load_players()
     user = players[players['id'] == user_code]
     if user.empty:
-        flash("Code not found.", "error")
+        flash("Code not recognized.", "error")
         return redirect(url_for('index'))
     return render_template('dashboard.html', user=user.iloc[0], is_admin=(user_code == '0001'))
 
+@app.route('/signup', methods=['POST'])
+def signup():
+    user_id = request.form.get('id')
+    players = load_players()
+    user = players[players['id'] == user_id]
+    if not user.empty:
+        # For now, we just confirm it works. Real database saving comes next!
+        flash(f"SUCCESS: {user.iloc[0]['first']} added to this week's list!", "success")
+    return redirect(url_for('index'))
+
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
-    # This matches the 'action' in your HTML form
     user_id = request.form.get('id')
     players = load_players()
     mask = players['id'] == user_id
@@ -61,8 +69,4 @@ def update_profile():
         players.to_csv(CSV_FILE, index=False)
         flash("Profile updated successfully!", "success")
     
-    user_data = players[players['id'] == user_id].iloc[0]
-    return render_template('dashboard.html', user=user_data, is_admin=(user_id == '0001'))
-
-if __name__ == "__main__":
-    app.run()
+    user_data = players[players['id
