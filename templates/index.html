@@ -22,7 +22,7 @@
 <body>
 
     <h1>🎾 Dawson Tennis Gang</h1>
-    <p style="color: #888;">Lafayette, CO | Start Time: <strong>{{ start_time }}</strong></p>
+    <p style="color: #888;">Lafayette, CO | Start Time: <strong>{{ start_time }} {{ weather }}</strong></p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -37,14 +37,13 @@
             <h3>Player Access</h3>
             <form action="/validate" method="POST">
                 <input type="text" id="codeField" name="code" oninput="checkAdmin()" placeholder="Enter your 4-digit code" required>
-                
-                <div id="passwordArea" class="hidden">
-                    <p style="color: #FFD700; font-size: 0.85em; margin: 10px 0 5px;">Admin Mode Active</p>
-                    <input type="password" name="password" placeholder="Enter Admin Password">
+    
+                <div id="passwordArea" style="display: none; margin-top: 10px;">
+                    <input type="password" name="password" placeholder="Admin Password">
                 </div>
-                
-                <button type="submit">Verify & Enter</button>
-            </form>
+    
+    <button type="submit">Login</button>
+</form>
             
             <a href="mailto:jpiccolini@dawsonschool.org?subject=Tennis Account Request&body=Hi Jim, please add me to the tennis roster list. My name is:" class="request-link">
                 Not on the list? Request an account
@@ -83,17 +82,17 @@
         {% endif %}
     </div>
 
+
     <script>
-        function checkAdmin() {
-            const codeInput = document.getElementById('codeField').value;
-            const passwordArea = document.getElementById('passwordArea');
-            
-            // Show password field immediately if 0001 is detected
-            if (codeInput === "0001") {
-                passwordArea.style.display = 'block';
-            } else {
-                passwordArea.style.display = 'none';
-            }
+    function checkAdmin() {
+        const codeInput = document.getElementById('codeField').value;
+        const passwordArea = document.getElementById('passwordArea');
+        
+        if (codeInput === "9999") {
+            passwordArea.style.display = 'block';
+        } else {
+            passwordArea.style.display = 'none';
+        }
         }
     </script>
 
