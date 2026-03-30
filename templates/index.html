@@ -13,13 +13,16 @@
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 8px; font-weight: bold; max-width: 400px; margin: 10px auto; }
         .success { background: #2e7d32; color: white; }
         .error { background: #d32f2f; color: white; }
-        .request-link { color: #888; font-size: 0.85em; text-decoration: underline; cursor: pointer; display: block; margin-top: 15px; }
+        .request-link { color: #888; font-size: 0.85em; text-decoration: none; display: block; margin-top: 20px; }
+        .request-link:hover { text-decoration: underline; color: #4CAF50; }
+        .roster-box { background: #1e1e1e; padding: 20px; border-radius: 15px; max-width: 400px; margin: 0 auto; border: 1px solid #333; text-align: left; }
+        .roster-list { padding-left: 20px; color: #4CAF50; }
     </style>
 </head>
 <body>
 
     <h1>🎾 Dawson Tennis Gang</h1>
-    <p style="color: #888;">Lafayette, CO | Start Time: {{ start_time }}</p>
+    <p style="color: #888;">Lafayette, CO | Start Time: <strong>{{ start_time }}</strong></p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -33,17 +36,19 @@
         {% if not session.get('user') %}
             <h3>Player Access</h3>
             <form action="/validate" method="POST">
-                <input type="text" id="codeField" name="code" placeholder="4-digit Code" oninput="checkAdmin()" required>
+                <input type="text" id="codeField" name="code" placeholder="4-digit Player Code" oninput="checkAdmin()" required autocomplete="off">
                 
                 <div id="passwordArea" class="hidden">
-                    <p style="color: #FFD700; font-size: 0.8em; margin: 5px 0;">Admin Detected: Enter Password</p>
-                    <input type="password" name="password" placeholder="Admin Password">
+                    <p style="color: #FFD700; font-size: 0.85em; margin: 10px 0 5px;">Admin Mode Active</p>
+                    <input type="password" name="password" placeholder="Enter Admin Password">
                 </div>
                 
                 <button type="submit">Verify & Enter</button>
             </form>
             
-            <a href="mailto:admin@example.com?subject=Tennis Account Request" class="request-link">Not on the list? Request an account</a>
+            <a href="mailto:jpiccolini@dawsonschool.org?subject=Tennis Account Request&body=Hi Jim, please add me to the tennis roster list. My name is:" class="request-link">
+                Not on the list? Request an account
+            </a>
 
         {% else %}
             <h3>Hi, {{ session['user']['first'] }}!</h3>
@@ -53,15 +58,28 @@
 
             {% if session['user']['is_admin'] %}
                 <div class="admin-box">
-                    <h4 style="color: #FFD700;">Admin Dashboard</h4>
+                    <h4 style="color: #FFD700; margin-top: 0;">Admin Dashboard</h4>
                     <form action="/update_time" method="POST">
-                        <input type="text" name="time_string" placeholder="New Time (e.g. 10:15 AM)" required>
+                        <input type="text" name="time_string" placeholder="New Time (e.g. 10:45 AM)" required>
                         <button type="submit" style="background: #FFD700; color: black;">Update Roster Time</button>
                     </form>
                 </div>
             {% endif %}
 
-            <a href="/logout" style="color: #888; display: block; margin-top: 15px; text-decoration: none; font-size: 0.8em;">Logout / Switch User</a>
+            <a href="/logout" style="color: #888; display: block; margin-top: 20px; text-decoration: none; font-size: 0.8em;">← Logout / Switch User</a>
+        {% endif %}
+    </div>
+
+    <div class="roster-box">
+        <h3 style="text-align: center; color: #4CAF50; margin-top: 0;">Current Roster</h3>
+        {% if roster %}
+            <ol class="roster-list">
+            {% for player in roster %}
+                <li>{{ player.name }} <span style="color: #666; font-size: 0.8em;">({{ player.date }})</span></li>
+            {% endfor %}
+            </ol>
+        {% else %}
+            <p style="text-align: center; color: #666;">No signups yet for this week.</p>
         {% endif %}
     </div>
 
@@ -70,11 +88,11 @@
             const codeInput = document.getElementById('codeField').value;
             const passwordArea = document.getElementById('passwordArea');
             
-            // If the user types 0001, show the password field. Otherwise, hide it.
+            // Show password field immediately if 0001 is detected
             if (codeInput === "0001") {
-                passwordArea.classList.remove('hidden');
+                passwordArea.style.display = 'block';
             } else {
-                passwordArea.classList.add('hidden');
+                passwordArea.style.display = 'none';
             }
         }
     </script>
