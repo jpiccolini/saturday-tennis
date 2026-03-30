@@ -8,6 +8,8 @@ app = Flask(__name__)
 app.secret_key = "dawson_tennis_admin_key_2026"
 
 CSV_FILE = 'players.csv'
+# This temporary list stores signups for the week
+weekly_roster = [] 
 
 def get_weather():
     try:
@@ -19,8 +21,8 @@ def get_weather():
         for i, t in enumerate(times):
             dt = datetime.fromisoformat(t)
             if dt.weekday() == 5: # Saturday
-                if dt.hour == 9:
-                    start_w = f"9AM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
+                if dt.hour == 9: # Closest to 8:45
+                    start_w = f"8:45AM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
                 if dt.hour == 12:
                     end_w = f"12PM: {r['hourly']['temperature_2m'][i]}°F ({r['hourly']['precipitation_probability'][i]}%)"
         
@@ -35,7 +37,7 @@ def load_players():
 
 @app.route('/')
 def index():
-    return render_template('index.html', weather=get_weather())
+    return render_template('index.html', weather=get_weather(), roster=weekly_roster)
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -51,10 +53,21 @@ def login():
 def signup():
     user_id = request.form.get('id')
     players = load_players()
-    user = players[players['id'] == user_id]
-    if not user.empty:
-        # For now, we just confirm it works. Real database saving comes next!
-        flash(f"SUCCESS: {user.iloc[0]['first']} added to this week's list!", "success")
+    user_row = players[players['id'] == user_id]
+    
+    if user_row.empty:
+        flash("Code not recognized.", "error")
+        return redirect(url_for('index'))
+    
+    player_name = f"{user_row.iloc[0]['first']} {user_row.iloc[0]['last']}"
+    
+    # Check if already signed up
+    if player_name in weekly_roster:
+        flash(f"Note: {player_name}, you are already on the list!", "success")
+    else:
+        weekly_roster.append(player_name)
+        flash(f"SUCCESS: {player_name} added for 8:45 AM Saturday!", "success")
+        
     return redirect(url_for('index'))
 
 @app.route('/update_profile', methods=['POST'])
@@ -69,4 +82,8 @@ def update_profile():
         players.to_csv(CSV_FILE, index=False)
         flash("Profile updated successfully!", "success")
     
-    user_data = players[players['id
+    user_data = players[players['id'] == user_id].iloc[0]
+    return render_template('dashboard.html', user=user_data, is_admin=(user_id == '0001'))
+
+if __name__ == "__main__":
+    app.run()
