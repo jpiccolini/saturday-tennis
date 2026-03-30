@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel | Dawson Tennis</title>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: white; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #1e1e1e; }
+        th, td { padding: 12px; border: 1px solid #333; text-align: left; }
+        th { background: #4CAF50; color: white; }
+        tr:hover { background: #2a2a2a; }
+        .btn { padding: 10px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Master Admin Panel</h1>
+    <a href="/" class="btn">← Back to Site</a>
+    
+    <h3>Current Weekly Signups ({{ roster|length }})</h3>
+    <ul>
+        {% for name in roster %}<li>{{ name }}</li>{% endfor %}
+    </ul>
+
+    <h3>All 97 Players</h3>
+    <table>
+        <tr>
+            <th>Code</th><th>Name</th><th>Email</th><th>Backup</th><th>Cell</th>
+        </tr>
+        {% for p in players %}
+        <tr>
+            <td>{{ p.id }}</td>
+            <td>{{ p.first }} {{ p.last }}</td>
+            <td>{{ p.email }}</td>
+            <td>{{ p.backup_email }}</td>
+            <td>{{ p.cell }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
