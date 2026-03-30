@@ -16,7 +16,7 @@ def get_next_saturday():
     today = datetime.now()
     days_ahead = (5 - today.weekday() + 7) % 7
     if days_ahead == 0: days_ahead = 7
-    return (today + timedelta(days_ahead)).strftime('%b %d, %Y') # Formats as 'Apr 04, 2026'
+    return (today + timedelta(days_ahead)).strftime('%b %d, %Y')
 
 def get_weather_forecast(time_str):
     """Fetches weather using Open-Meteo (Data-center friendly)"""
@@ -39,10 +39,10 @@ def index():
     
     print("-> Fetching Schedule from Google...")
     try:
-        sched_resp = requests.get(f"{GAS_URL}?action=getSchedule", timeout=4).json()
+        # Bumped to 15 seconds so Google Apps Script has time to wake up
+        sched_resp = requests.get(f"{GAS_URL}?action=getSchedule", timeout=15).json()
         raw_time = sched_resp.get('startTime', '8:45 AM')
         
-        # Extract ONLY the time (e.g., "8:45 AM"), destroying the 1899 date string
         time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', str(raw_time), re.IGNORECASE)
         display_start = time_match.group(1).upper() if time_match else "8:45 AM"
         print(f"-> Time parsed successfully: {display_start}")
@@ -52,7 +52,8 @@ def index():
 
     print("-> Fetching Roster from Google...")
     try:
-        roster_resp = requests.get(f"{GAS_URL}?action=getPlayers", timeout=4).json()
+        # Bumped to 15 seconds
+        roster_resp = requests.get(f"{GAS_URL}?action=getPlayers", timeout=15).json()
     except Exception as e:
         print(f"-> Roster fetch failed: {e}")
         roster_resp = []
@@ -71,30 +72,38 @@ def validate():
     if request.method == 'GET':
         return redirect(url_for('index'))
 
+    print("=== VALIDATE ROUTE TRIGGERED ===")
     code = request.form.get('code')
     password = request.form.get('password')
+    print(f"-> Attempting to validate code: {code}")
 
     try:
-        # BUMPED TIMEOUT TO 15 SECONDS to give Google time to wake up
+        # BUMPED TIMEOUT TO 15 SECONDS
         response = requests.get(f"{GAS_URL}?action=validateCode&code={code}", timeout=15)
         data = response.json()
+        print(f"-> Google Script response: {data}")
 
         if data.get('found'):
             if str(code) == "9999":
                 if password == ADMIN_PASSWORD:
+                    print("-> Admin Login SUCCESS")
                     session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': True}
                     flash("Admin Access Granted", "success")
                 else:
+                    print("-> Admin Login FAILED (Bad Password)")
                     flash("Incorrect Admin Password", "error")
             else:
+                print("-> Player Login SUCCESS")
                 session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': False}
         else:
+            print("-> Invalid Player Code")
             flash("Invalid Player Code", "error")
             
     except Exception as e:
-        print(f"-> EXCEPTION: {e}")
+        print(f"-> EXCEPTION in validate: {str(e)}")
         flash("Google connection timed out. Please try again.", "error")
     
+    print("=== REDIRECTING TO INDEX ===")
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
@@ -107,7 +116,7 @@ def signup():
             "date": get_next_saturday(), 
             "first": session['user']['first'], 
             "last": session['user']['last']
-        }, timeout=5)
+        }, timeout=15)
         flash("Successfully signed up!", "success")
     except:
         flash("Signup failed.", "error")
@@ -121,7 +130,7 @@ def update_time():
         requests.post(GAS_URL, json={
             "action": "updateSchedule", 
             "hour": request.form.get('time_string')
-        }, timeout=5)
+        }, timeout=15)
         flash("Start time updated!", "success")
     except:
         flash("Failed to update.", "error")
@@ -133,6 +142,5 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    # Binds to Render's required PORT environment variable
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
