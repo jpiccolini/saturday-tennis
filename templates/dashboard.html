@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h2>Welcome, {{ user['first'] }}!</h2>
+    
+    <div style="background: #fff; padding: 20px; border-radius: 10px; display: inline-block;">
+        <h3>Update Your Info</h3>
+        <form action="/update_profile" method="post">
+            <input type="hidden" name="id" value="{{ user['id'] }}">
+            <label>First Name:</label><br>
+            <input type="text" name="first" value="{{ user['first'] }}"><br><br>
+            <label>Last Name:</label><br>
+            <input type="text" name="last" value="{{ user['last'] }}"><br><br>
+            <label>Email:</label><br>
+            <input type="email" name="email" value="{{ user['email'] }}"><br><br>
+            <label>Backup Email:</label><br>
+            <input type="email" name="backup_email" value="{{ user['backup_email'] }}"><br><br>
+            <label>Cell Phone:</label><br>
+            <input type="text" name="cell" value="{{ user['cell'] }}"><br><br>
+            <button type="submit" style="background: #2980b9; color:white;">Save Changes</button>
+        </form>
+    </div>
+
+    <hr>
+    <form action="/join" method="post">
+        <input type="hidden" name="id" value="{{ user['id'] }}">
+        <button type="submit" style="padding: 20px; font-size: 20px; background: #27ae60; color: white;">SIGN ME UP FOR THIS SATURDAY</button>
+    </form>
+</body>
+</html>
