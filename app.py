@@ -1,83 +1,46 @@
 import os
 import requests
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from datetime import datetime, timedelta
+from flask import Flask, render_template, request, redirect, url_for, session
 
 app = Flask(__name__)
-app.secret_key = "tennis_secret_key"  # You can change this to any random string
+app.secret_key = "tennis_secret_key"
 
-# --- CONFIGURATION ---
-# REPLACE THE URL BELOW WITH YOUR ACTUAL GOOGLE SCRIPT URL
-GSHEET_API_URL = "https://script.google.com/macros/s/AKfycbx_CUQsBynGKV6WvhQ3aAjjAxHR8zXnUeHXbNtIFc5TT4AsEaR3CPNaEdMRHxTsD0puLQ/exec"
-
-def get_next_saturday():
-    today = datetime.now()
-    days_ahead = 5 - today.weekday()
-    if days_ahead <= 0: # Target next Saturday if today is Sat/Sun
-        days_ahead += 7
-    return (today + timedelta(days=days_ahead)).strftime('%m/%d/%Y')
+# YOUR ACTUAL URL
+GSHEET_API_URL = "https://script.google.com/macros/s/AKfycbwWgcJ9Ij8QJBjOLsriNqUiyjaLEec-TYV7gJ0pAdqmb1yjeqVT70lXrlG6HMJEzWpxpQ/exec"
 
 @app.route('/')
 def index():
-    next_sat = get_next_saturday()
-    # Fetch players from Google Sheet
+    players = []
     try:
-        response = requests.get(f"{GSHEET_API_URL}?action=getPlayers")
-        all_players = response.json()
-        # Filter only for the upcoming Saturday
-        players = [p['name'] for p in all_players if p['date'] == next_sat]
+        response = requests.get(f"{GSHEET_API_URL}?action=getPlayers", timeout=10)
+        if response.status_code == 200:
+            players = [p.get('name') for p in response.json() if p.get('name')]
     except:
-        players = []
-
-    return render_template('index.html', 
-                           players=players, 
-                           next_saturday=next_sat,
-                           logged_in='player_id' in session,
-                           player_name=session.get('player_name', ''),
-                           is_admin=session.get('is_admin', False))
+        pass
+    return render_template('index.html', players=players, logged_in='player_id' in session)
 
 @app.route('/login', methods=['POST'])
 def login():
     code = request.form.get('player_code')
-    if not code:
-        return redirect(url_for('index'))
-
     try:
-        response = requests.get(f"{GSHEET_API_URL}?action=validateCode&code={code}")
+        # Handling the redirect properly
+        response = requests.get(f"{GSHEET_API_URL}?action=validateCode&code={code}", timeout=10, allow_redirects=True)
         data = response.json()
-
         if data.get('found'):
             session['player_id'] = code
-            session['player_name'] = f"{data.get('first')} {data.get('last')}"
-            session['is_admin'] = (str(code) == "0001")
+            session['player_name'] = f"{data.get('first', '')} {data.get('last', '')}".strip()
             return redirect(url_for('index'))
-        else:
-            return "Invalid Player Code. Please check your ID and try again.", 401
     except Exception as e:
-        return f"Connection Error: {str(e)}", 500
+        print(f"Login Error: {e}")
+    return "Login Failed. Check your code.", 401
 
 @app.route('/signup', methods=['POST'])
 def signup():
-    if 'player_id' not in session:
-        return redirect(url_for('index'))
-
-    payload = {
-        "action": "signup",
-        "name": session['player_name'],
-        "date": get_next_saturday()
-    }
-    
-    try:
-        requests.post(GSHEET_API_URL, json=payload)
-    except:
-        pass
-
+    if 'player_name' in session:
+        requests.post(GSHEET_API_URL, json={"action": "signup", "name": session['player_name']}, timeout=10)
     return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('index'))
-
-if __name__ == '__main__':
-    app.run(debug=True)
