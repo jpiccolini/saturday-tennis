@@ -19,23 +19,19 @@ def get_next_saturday():
     return (today + timedelta(days_ahead)).strftime('%b %d, %Y') # Formats as 'Apr 04, 2026'
 
 def get_weather_forecast(time_str):
-    """Fetches weather for the specific hour."""
+    """Fetches weather using Open-Meteo (Data-center friendly)"""
     print("-> Fetching Weather...")
     try:
-        match = re.search(r'(\d+)', str(time_str))
-        hour = int(match.group(1)) if match else 9
-        if "PM" in str(time_str).upper() and hour != 12: hour += 12
-        
-        # Extremely strict 2-second timeout so the weather API can't freeze your app
-        response = requests.get(f"https://wttr.in/Lafayette,CO?format=%C+%t", timeout=2)
-        
-        end_hour = (hour + 3)
-        end_display = f"{end_hour-12}:00 PM" if end_hour > 12 else f"{end_hour}:00 AM"
+        # Coordinates for Lafayette, CO
+        url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&current_weather=true"
+        response = requests.get(url, timeout=5).json()
+        temp_c = response['current_weather']['temperature']
+        temp_f = int((temp_c * 9/5) + 32)
         print("-> Weather fetched successfully.")
-        return f"Forecast for {time_str}: {response.text} (Ends approx {end_display})"
+        return f" | Current Temp: {temp_f}°F"
     except Exception as e:
-        print(f"-> Weather skipped/failed: {e}")
-        return "Weather currently unavailable (API slow)"
+        print(f"-> Weather failed: {e}")
+        return "" # Returns nothing if it fails so it doesn't look ugly
 
 @app.route('/')
 def index():
@@ -72,42 +68,33 @@ def index():
 
 @app.route('/validate', methods=['GET', 'POST'])
 def validate():
-    # Prevent crash if user refreshes the page manually
     if request.method == 'GET':
         return redirect(url_for('index'))
 
-    print("=== VALIDATE ROUTE TRIGGERED ===")
     code = request.form.get('code')
     password = request.form.get('password')
-    print(f"-> Attempting to validate code: {code}")
 
     try:
-        response = requests.get(f"{GAS_URL}?action=validateCode&code={code}", timeout=5)
+        # BUMPED TIMEOUT TO 15 SECONDS to give Google time to wake up
+        response = requests.get(f"{GAS_URL}?action=validateCode&code={code}", timeout=15)
         data = response.json()
-        print(f"-> Google Script response: {data}")
 
         if data.get('found'):
-            # CHANGED TO 9999
             if str(code) == "9999":
                 if password == ADMIN_PASSWORD:
-                    print("-> Admin Login SUCCESS")
                     session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': True}
                     flash("Admin Access Granted", "success")
                 else:
-                    print("-> Admin Login FAILED (Bad Password)")
                     flash("Incorrect Admin Password", "error")
             else:
-                print("-> Player Login SUCCESS")
                 session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': False}
         else:
-            print("-> Invalid Player Code")
             flash("Invalid Player Code", "error")
             
     except Exception as e:
-        print(f"-> EXCEPTION in validate: {str(e)}")
+        print(f"-> EXCEPTION: {e}")
         flash("Google connection timed out. Please try again.", "error")
     
-    print("=== REDIRECTING TO INDEX ===")
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
