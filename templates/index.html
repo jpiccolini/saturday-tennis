@@ -1,43 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Dawson Saturday Tennis</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dawson Tennis Gang</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f4f4f4; }
-        .court-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; }
-        .court { background: white; border: 2px solid #2c3e50; border-radius: 8px; padding: 10px; }
-        .waitlist { background: #eee; padding: 10px; margin: 20px; border-radius: 8px; }
-        .btn { background: #27ae60; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
+        .weather { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 20px; color: #4CAF50; border: 1px solid #333; }
+        .box { background: #1e1e1e; padding: 25px; border-radius: 15px; max-width: 400px; margin: 0 auto; border: 1px solid #333; }
+        input { padding: 12px; border-radius: 5px; border: 1px solid #444; background: #222; color: white; width: 80%; margin-bottom: 10px; font-size: 16px; }
+        button { padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 85%; }
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 8px; font-weight: bold; }
+        .success { background: #2e7d32; color: white; }
+        .error { background: #d32f2f; color: white; }
     </style>
 </head>
 <body>
-    <h1>Dawson School Saturday Tennis Gang</h1>
-    <div id="weather">☀️ Forecast: {{ weather }}</div>
-    
-    <hr>
-    
-    <h3>Sign In to Play / Update Profile</h3>
-    <form action="/login" method="post">
-        <input type="text" name="code" placeholder="Enter 4-digit Code" required maxlength="4">
-        <button type="submit" class="btn">Go</button>
-    </form>
 
-    <div class="court-grid">
-        <div class="court">
-            <h4>Court 1</h4>
-            <ol align="left">
-                <li>Jim Piccolini (Admin)</li>
-                <li>...</li>
-                <li>...</li>
-                <li>...</li>
-            </ol>
-        </div>
-        </div>
-
-    <div class="waitlist">
-        <h4>Waitlist</h4>
-        <ul id="wait-items"></ul>
+    <h1>Dawson Saturday Tennis</h1>
+    
+    <div class="weather">
+        <strong>{{ weather }}</strong>
     </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="box">
+        <h3>Player Login / Signup</h3>
+        <p style="color: #888; font-size: 0.9em;">Enter your 4-digit code to sign up or update info.</p>
+        
+        <form action="/login" method="POST">
+            <input type="text" name="code" placeholder="Enter 4-digit Code" required>
+            <button type="submit">Go to Dashboard</button>
+        </form>
+
+        <hr style="border: 0; border-top: 1px solid #333; margin: 20px 0;">
+
+        <form action="/signup" method="POST">
+            <input type="text" name="id" placeholder="Confirm Code to Sign Up" required>
+            <button type="submit" style="background: #2196F3;">Add My Name to List</button>
+        </form>
+    </div>
+
 </body>
 </html>
