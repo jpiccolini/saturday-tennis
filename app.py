@@ -8,7 +8,7 @@ app.secret_key = "tennis_roster_secure_key"
 
 # --- CONFIGURATION ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbyCzNjCIIkWhJlwU-LlOCq1bZhg-B5HW7B6ketU-E8b87OUQjeKKSp5_OrQHa0F5MWPSw/exec"
-ADMIN_PASSWORD = "jujubeE2" # <--- Set your desired admin password here
+ADMIN_PASSWORD = "jujubeE2" 
 
 def get_next_saturday():
     """Calculates the date of the upcoming Saturday."""
@@ -20,20 +20,20 @@ def get_next_saturday():
 def get_weather_forecast(time_str):
     """Parses a string like '8:45 AM' to get a weather window."""
     try:
-        # Extract the first number found in the string (the hour)
+        # Extract the hour from the string (e.g., '8' from '8:45 AM')
         match = re.search(r'(\d+)', str(time_str))
         hour = int(match.group(1)) if match else 9
         
-        # Simple PM adjustment for weather estimation
+        # Adjust for PM (simple logic for display)
         if "PM" in str(time_str).upper() and hour != 12:
             hour += 12
         
         city = "Lafayette,CO"
-        # Using a text-based weather API
+        # wttr.in format: %C=Condition, %t=Temperature
         response = requests.get(f"https://wttr.in/{city}?format=%C+%t", timeout=5)
         condition_temp = response.text
         
-        # Calculate a 3-hour window for the end time
+        # Calculate approximate end time (3 hours later)
         end_hour = (hour + 3)
         end_display = f"{end_hour-12}:00 PM" if end_hour > 12 else f"{end_hour}:00 AM"
         
@@ -43,16 +43,16 @@ def get_weather_forecast(time_str):
 
 @app.route('/')
 def index():
-    # 1. Fetch Schedule from Google
+    # 1. Fetch Schedule Time from Google Settings
     try:
-        sched_resp = requests.get(f"{GAS_URL}?action=getSchedule", timeout=10).json()
+        sched_resp = requests.get(f"{GAS_URL}?action=getSchedule", timeout=8).json()
         display_start = sched_resp.get('startTime', '8:45 AM')
     except:
         display_start = "8:45 AM"
 
-    # 2. Fetch Roster from Google
+    # 2. Fetch Current Roster
     try:
-        roster_resp = requests.get(f"{GAS_URL}?action=getPlayers", timeout=10).json()
+        roster_resp = requests.get(f"{GAS_URL}?action=getPlayers", timeout=8).json()
     except:
         roster_resp = []
 
@@ -65,37 +65,48 @@ def index():
 @app.route('/validate', methods=['POST'])
 def validate():
     code = request.form.get('code')
-    password = request.form.get('password') # Captured for admin 0001
+    password = request.form.get('password')
 
     try:
-        response = requests.get(f"{GAS_URL}?action=validateCode&code={code}", timeout=10)
+        # Request validation from Google Script
+        response = requests.get(f"{GAS_URL}?action=validateCode&code={code}", timeout=8)
         data = response.json()
 
         if data.get('found'):
-            # ADMIN CHECK: Must be code 0001 AND correct password
+            # Admin Logic (Code 0001 + Password)
             if str(code) == "0001":
                 if password == ADMIN_PASSWORD:
-                    session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': True}
-                    flash("Admin Dashboard Active", "success")
+                    session['user'] = {
+                        'first': data['first'], 
+                        'last': data['last'], 
+                        'is_admin': True
+                    }
+                    flash("Admin Access Granted", "success")
                 else:
                     flash("Incorrect Admin Password", "error")
                     return redirect(url_for('index'))
             else:
-                # Regular Player login (e.g. 1001)
-                session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': False}
+                # Regular Player Logic (e.g., 1001)
+                session['user'] = {
+                    'first': data['first'], 
+                    'last': data['last'], 
+                    'is_admin': False
+                }
             
             return redirect(url_for('index'))
         else:
             flash("Invalid Player Code", "error")
+            
     except Exception as e:
-        flash(f"Connection Error: {str(e)}", "error")
+        print(f"Log Error: {e}")
+        flash("Communication with Google failed. Please try again.", "error")
     
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
 def signup():
     if 'user' not in session:
-        flash("Please enter your code first", "error")
+        flash("Please log in first", "error")
         return redirect(url_for('index'))
 
     payload = {
@@ -106,26 +117,25 @@ def signup():
     }
 
     try:
-        requests.post(GAS_URL, json=payload, timeout=10)
+        requests.post(GAS_URL, json=payload, timeout=8)
         flash(f"Successfully signed up for {get_next_saturday()}!", "success")
     except:
-        flash("Sheet update failed. Please try again.", "error")
+        flash("Signup failed. Check connection.", "error")
 
     return redirect(url_for('index'))
 
 @app.route('/update_time', methods=['POST'])
 def update_time():
-    # Security: Ensure only admins can trigger this
     if not session.get('user', {}).get('is_admin'):
         flash("Unauthorized", "error")
         return redirect(url_for('index'))
     
-    new_time = request.form.get('time_string') # e.g., "10:30 AM"
+    new_time = request.form.get('time_string') 
     try:
-        requests.post(GAS_URL, json={"action": "updateSchedule", "hour": new_time}, timeout=10)
+        requests.post(GAS_URL, json={"action": "updateSchedule", "hour": new_time}, timeout=8)
         flash(f"Start time updated to {new_time}", "success")
     except:
-        flash("Failed to update schedule in Google Sheets", "error")
+        flash("Failed to update Google Settings", "error")
     
     return redirect(url_for('index'))
 
