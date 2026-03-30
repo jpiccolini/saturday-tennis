@@ -10,7 +10,7 @@ app.secret_key = "dawson_tennis_admin_key_2026"
 
 # --- CONFIGURATION ---
 # PASTE YOUR FULL https://.../exec URL HERE
-GSHEET_API_URL = "https://script.google.com/macros/s/AKfycby9j5oZGcXUt237ObFs3KXLBJBMI9l9XhpoTIQnfEmAfWjaUqBUan4UhVDkotyr4oRYlQ/exec"
+GSHEET_API_URL = "https://script.google.com/macros/s/AKfycbx_CUQsBynGKV6WvhQ3aAjjAxHR8zXnUeHXbNtIFc5TT4AsEaR3CPNaEdMRHxTsD0puLQ/exec"
 ADMIN_CODE = '0001'
 ADMIN_PASSWORD = 'ChangeMeSoon'
 
