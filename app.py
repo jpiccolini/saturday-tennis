@@ -1,46 +1,83 @@
-import os
 import requests
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, session
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
-app.secret_key = "tennis_secret_key"
+app.secret_key = "tennis_roster_secure_key" # Keeps your session data safe
 
-# YOUR ACTUAL URL
-GSHEET_API_URL = "https://script.google.com/macros/s/AKfycbwWgcJ9Ij8QJBjOLsriNqUiyjaLEec-TYV7gJ0pAdqmb1yjeqVT70lXrlG6HMJEzWpxpQ/exec"
+# Use your provided deployment URL
+GAS_URL = "https://script.google.com/macros/s/AKfycbwgbY1HG6hCDdx6xA5ACwc4snKp9WFwMeuymipJG78AlfZU_QfjeN9tYDq--RaHFSzQ9w/exec"
+
+def get_next_saturday():
+    """Calculates the date of the upcoming Saturday."""
+    today = datetime.now()
+    # Saturday is weekday 5. (5 - current_weekday) % 7 
+    # If today is Saturday, it finds the NEXT Saturday.
+    days_ahead = (5 - today.weekday() + 7) % 7
+    if days_ahead == 0: days_ahead = 7 
+    next_sat = today + timedelta(days_ahead)
+    return next_sat.strftime('%Y-%m-%d')
 
 @app.route('/')
 def index():
-    players = []
-    try:
-        response = requests.get(f"{GSHEET_API_URL}?action=getPlayers", timeout=10)
-        if response.status_code == 200:
-            players = [p.get('name') for p in response.json() if p.get('name')]
-    except:
-        pass
-    return render_template('index.html', players=players, logged_in='player_id' in session)
+    # We'll calculate the date here so the front-end knows which Saturday we are targeting
+    target_date = get_next_saturday()
+    return render_template('index.html', target_date=target_date)
 
-@app.route('/login', methods=['POST'])
-def login():
-    code = request.form.get('player_code')
+@app.route('/validate', methods=['POST'])
+def validate():
+    code = request.form.get('code')
+    if not code:
+        return jsonify({"success": False, "message": "No code provided"}), 400
+
     try:
-        # Handling the redirect properly
-        response = requests.get(f"{GSHEET_API_URL}?action=validateCode&code={code}", timeout=10, allow_redirects=True)
+        # Step 1: Ask Google Script to validate the code
+        # We use a GET request for validation as defined in our doGet
+        response = requests.get(f"{GAS_URL}?action=validateCode&code={code}")
         data = response.json()
+
         if data.get('found'):
-            session['player_id'] = code
-            session['player_name'] = f"{data.get('first', '')} {data.get('last', '')}".strip()
-            return redirect(url_for('index'))
+            # Store player info in the session so they don't have to re-log
+            session['user'] = {
+                'first': data['first'],
+                'last': data['last'],
+                'isAdmin': data.get('isAdmin', False) # Logic from our Step 1 script
+            }
+            return jsonify({"success": True, "user": session['user']})
+        
+        return jsonify({"success": False, "message": "Invalid Player Code"}), 401
+
     except Exception as e:
-        print(f"Login Error: {e}")
-    return "Login Failed. Check your code.", 401
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/signup', methods=['POST'])
 def signup():
-    if 'player_name' in session:
-        requests.post(GSHEET_API_URL, json={"action": "signup", "name": session['player_name']}, timeout=10)
-    return redirect(url_for('index'))
+    if 'user' not in session:
+        return jsonify({"success": False, "message": "Please validate your code first"}), 403
+
+    # The date is passed from the front-end or calculated here
+    target_date = get_next_saturday()
+    
+    # Prepare the payload for Google Script's doPost
+    payload = {
+        "action": "signup",
+        "date": target_date,
+        "first": session['user']['first'],
+        "last": session['user']['last']
+    }
+
+    try:
+        # Step 2: POST the data to Google Sheets
+        # requests.post handles the 302 redirect automatically
+        response = requests.post(GAS_URL, json=payload)
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('index'))
+    return jsonify({"success": True})
+
+if __name__ == '__main__':
+    app.run(debug=True)
