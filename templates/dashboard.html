@@ -1,30 +1,39 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player Dashboard | Dawson Tennis</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { background-color: #1e1e1e; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 450px; }
+        h2 { color: #4CAF50; margin-top: 0; }
+        .alert { padding: 12px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; text-align: center; }
+        .success { background-color: #2e7d32; color: white; }
+        .error { background-color: #d32f2f; color: white; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #bbb; font-size: 0.9em; }
+        input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #333; background-color: #2a2a2a; color: white; box-sizing: border-box; }
+        input:focus { border-color: #4CAF50; outline: none; }
+        button { width: 100%; padding: 12px; background-color: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: bold; margin-top: 10px; transition: background 0.3s; }
+        button:hover { background-color: #45a049; }
+        .admin-badge { display: inline-block; background: #ff9800; color: black; padding: 2px 8px; border-radius: 4px; font-size: 0.7em; vertical-align: middle; margin-left: 5px; text-transform: uppercase; }
+        .back-link { display: block; text-align: center; margin-top: 20px; color: #888; text-decoration: none; font-size: 0.9em; }
+        .back-link:hover { color: #4CAF50; }
+    </style>
+</head>
 <body>
-    <h2>Welcome, {{ user['first'] }}!</h2>
-    
-    <div style="background: #fff; padding: 20px; border-radius: 10px; display: inline-block;">
-        <h3>Update Your Info</h3>
-        <form action="/update_profile" method="post">
-            <input type="hidden" name="id" value="{{ user['id'] }}">
-            <label>First Name:</label><br>
-            <input type="text" name="first" value="{{ user['first'] }}"><br><br>
-            <label>Last Name:</label><br>
-            <input type="text" name="last" value="{{ user['last'] }}"><br><br>
-            <label>Email:</label><br>
-            <input type="email" name="email" value="{{ user['email'] }}"><br><br>
-            <label>Backup Email:</label><br>
-            <input type="email" name="backup_email" value="{{ user['backup_email'] }}"><br><br>
-            <label>Cell Phone:</label><br>
-            <input type="text" name="cell" value="{{ user['cell'] }}"><br><br>
-            <button type="submit" style="background: #2980b9; color:white;">Save Changes</button>
-        </form>
-    </div>
 
-    <hr>
-    <form action="/join" method="post">
-        <input type="hidden" name="id" value="{{ user['id'] }}">
-        <button type="submit" style="padding: 20px; font-size: 20px; background: #27ae60; color: white;">SIGN ME UP FOR THIS SATURDAY</button>
-    </form>
-</body>
-</html>
+<div class="container">
+    <h2>Welcome, {{ user.first }}! {% if is_admin %}<span class="admin-badge">Admin</span>{% endif %}</h2>
+    <p style="color: #888;">Update your contact info for the weekly roster.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form action="/update
