@@ -1,83 +1,111 @@
 import requests
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, flash, redirect, url_for
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
-app.secret_key = "tennis_roster_secure_key" # Keeps your session data safe
+app.secret_key = "tennis_roster_secure_key"
 
-# Use your provided deployment URL
 GAS_URL = "https://script.google.com/macros/s/AKfycbxho8NgMSpmKA8afOw43TBsgx46EO79_okFu1H9t76mES2ZSrNBddcCydTXtktQjX2stQ/exec"
 
 def get_next_saturday():
-    """Calculates the date of the upcoming Saturday."""
     today = datetime.now()
-    # Saturday is weekday 5. (5 - current_weekday) % 7 
-    # If today is Saturday, it finds the NEXT Saturday.
     days_ahead = (5 - today.weekday() + 7) % 7
-    if days_ahead == 0: days_ahead = 7 
-    next_sat = today + timedelta(days_ahead)
-    return next_sat.strftime('%Y-%m-%d')
+    if days_ahead == 0: days_ahead = 7
+    return (today + timedelta(days_ahead)).strftime('%Y-%m-%d')
+
+def get_weather_forecast(hour):
+    """
+    Fetches weather for Lafayette, CO. 
+    Flexes based on the 'hour' provided by Google Sheets.
+    """
+    try:
+        # Using wttr.in for a quick, no-auth weather string
+        # format: %C=Condition, %t=Temp
+        city = "Lafayette,CO"
+        response = requests.get(f"https://wttr.in/{city}?format=%C+%t")
+        condition_temp = response.text
+        
+        # Calculate the "Arrival" and "Mid-Play" times
+        arrival_time = f"{hour-1}:45 AM" if hour <= 12 else f"{hour-13}:45 PM"
+        peak_time = f"{hour+1}:00 AM" if (hour+1) < 12 else f"{(hour+1)-12 if hour+1 > 12 else 12}:00 PM"
+        
+        return f"Forecast for {arrival_time}: {condition_temp} (Expected peak at {peak_time})"
+    except:
+        return "Weather currently unavailable"
 
 @app.route('/')
 def index():
-    # We'll calculate the date here so the front-end knows which Saturday we are targeting
+    # 1. Get the Schedule/Hour from Google
+    try:
+        sched_resp = requests.get(f"{GAS_URL}?action=getSchedule").json()
+        start_hour = int(sched_resp.get('hour', 9))
+        display_start = sched_resp.get('startTime', '8:45 AM')
+    except:
+        start_hour = 9
+        display_start = "8:45 AM"
+
+    # 2. Get the Roster
+    try:
+        roster_resp = requests.get(f"{GAS_URL}?action=getPlayers").json()
+    except:
+        roster_resp = []
+
+    weather_info = get_weather_forecast(start_hour)
     target_date = get_next_saturday()
-    return render_template('index.html', target_date=target_date)
+
+    return render_template('index.html', 
+                           weather=weather_info, 
+                           start_time=display_start,
+                           target_date=target_date,
+                           roster=roster_resp)
 
 @app.route('/validate', methods=['POST'])
 def validate():
     code = request.form.get('code')
-    if not code:
-        return jsonify({"success": False, "message": "No code provided"}), 400
-
     try:
-        # Step 1: Ask Google Script to validate the code
-        # We use a GET request for validation as defined in our doGet
         response = requests.get(f"{GAS_URL}?action=validateCode&code={code}")
         data = response.json()
 
         if data.get('found'):
-            # Store player info in the session so they don't have to re-log
+            # Security: Explicitly check for 0001 for Admin rights
             session['user'] = {
                 'first': data['first'],
                 'last': data['last'],
-                'isAdmin': data.get('isAdmin', False) # Logic from our Step 1 script
+                'is_admin': (str(code) == "0001")
             }
-            return jsonify({"success": True, "user": session['user']})
-        
-        return jsonify({"success": False, "message": "Invalid Player Code"}), 401
-
+            return redirect(url_for('index'))
+        else:
+            flash("Invalid code.", "error")
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+        flash(f"Server Error: {str(e)}", "error")
+    
+    return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
 def signup():
     if 'user' not in session:
-        return jsonify({"success": False, "message": "Please validate your code first"}), 403
+        flash("Please log in first.", "error")
+        return redirect(url_for('index'))
 
-    # The date is passed from the front-end or calculated here
-    target_date = get_next_saturday()
-    
-    # Prepare the payload for Google Script's doPost
     payload = {
         "action": "signup",
-        "date": target_date,
+        "date": get_next_saturday(),
         "first": session['user']['first'],
         "last": session['user']['last']
     }
 
     try:
-        # Step 2: POST the data to Google Sheets
-        # requests.post handles the 302 redirect automatically
-        response = requests.post(GAS_URL, json=payload)
-        return jsonify(response.json())
-    except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+        requests.post(GAS_URL, json=payload)
+        flash("You are signed up!", "success")
+    except:
+        flash("Signup failed. Try again.", "error")
+
+    return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
     session.clear()
-    return jsonify({"success": True})
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True)
