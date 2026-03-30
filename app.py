@@ -8,7 +8,7 @@ app = Flask(__name__)
 app.secret_key = "tennis_roster_secure_key"
 
 # --- CONFIGURATION ---
-GAS_URL = "https://script.google.com/macros/s/AKfycbyCzNjCIIkWhJlwU-LlOCq1bZhg-B5HW7B6ketU-E8b87OUQjeKKSp5_OrQHa0F5MWPSw/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbzx4kmb_J5y8UFJ816tWKRLsjjjEsAukLTDCXiW5FuvU9Pw6xZvDgO0K80Xq1oNdaT6_A/exec"
 ADMIN_PASSWORD = "jujubeE2" 
 
 def get_next_saturday():
