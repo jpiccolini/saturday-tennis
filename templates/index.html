@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dawson Saturday Tennis</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #f4f4f4; }
+        .court-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; }
+        .court { background: white; border: 2px solid #2c3e50; border-radius: 8px; padding: 10px; }
+        .waitlist { background: #eee; padding: 10px; margin: 20px; border-radius: 8px; }
+        .btn { background: #27ae60; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Dawson School Saturday Tennis Gang</h1>
+    <div id="weather">☀️ Forecast: {{ weather }}</div>
+    
+    <hr>
+    
+    <h3>Sign In to Play / Update Profile</h3>
+    <form action="/login" method="post">
+        <input type="text" name="code" placeholder="Enter 4-digit Code" required maxlength="4">
+        <button type="submit" class="btn">Go</button>
+    </form>
+
+    <div class="court-grid">
+        <div class="court">
+            <h4>Court 1</h4>
+            <ol align="left">
+                <li>Jim Piccolini (Admin)</li>
+                <li>...</li>
+                <li>...</li>
+                <li>...</li>
+            </ol>
+        </div>
+        </div>
+
+    <div class="waitlist">
+        <h4>Waitlist</h4>
+        <ul id="wait-items"></ul>
+    </div>
+</body>
+</html>
