@@ -9,8 +9,8 @@ app = Flask(__name__)
 app.secret_key = "dawson_tennis_admin_key_2026"
 
 # --- CONFIGURATION ---
+# PASTE YOUR FULL https://.../exec URL HERE
 GSHEET_API_URL = "https://script.google.com/macros/s/AKfycby9j5oZGcXUt237ObFs3KXLBJBMI9l9XhpoTIQnfEmAfWjaUqBUan4UhVDkotyr4oRYlQ/exec"
-CSV_FILE = 'players.csv'
 ADMIN_CODE = '0001'
 ADMIN_PASSWORD = 'ChangeMeSoon'
 
@@ -35,7 +35,7 @@ def get_weather():
 @app.route('/')
 def index():
     try:
-        r = requests.get(f"{GSHEET_API_URL}?action=getRoster", timeout=5)
+        r = requests.get(f"{GSHEET_API_URL}?action=getRoster", timeout=10)
         current_roster = r.json()
     except: current_roster = []
     return render_template('index.html', weather=get_weather(), roster=current_roster)
@@ -43,65 +43,62 @@ def index():
 @app.route('/login', methods=['POST'])
 def login():
     user_code = request.form.get('code')
-    players = pd.read_csv(CSV_FILE, dtype={'id': str})
-    user_row = players[players['id'] == user_code]
-    if user_row.empty:
-        flash("Code not recognized.", "error")
+    r = requests.get(f"{GSHEET_API_URL}?action=validateCode&code={user_code}", timeout=10).json()
+    
+    if not r['found']:
+        flash("Code not recognized. Please request access below.", "error")
         return redirect(url_for('index'))
+    
     if user_code == ADMIN_CODE: return redirect(url_for('admin_dashboard'))
-    return render_template('dashboard.html', user=user_row.iloc[0], is_admin=False)
+    
+    user_data = {'id': user_code, 'first': r['first'], 'last': r['last'], 'email': r['email'], 'cell': r['cell']}
+    return render_template('dashboard.html', user=user_data, is_admin=False)
 
-@app.route('/admin_dashboard')
-@admin_required
-def admin_dashboard():
-    players = pd.read_csv(CSV_FILE, dtype={'id': str})
-    admin_data = players[players['id'] == ADMIN_CODE].iloc[0]
-    return render_template('dashboard.html', user=admin_data, is_admin=True)
+@app.route('/request_access', methods=['POST'])
+def request_access():
+    payload = {
+        'action': 'request_access',
+        'id': request.form.get('id'),
+        'first': request.form.get('first'),
+        'last': request.form.get('last'),
+        'email': request.form.get('email'),
+        'cell': request.form.get('cell')
+    }
+    try:
+        requests.post(GSHEET_API_URL, json=payload, timeout=10)
+        flash("Request sent! Admin will notify you once approved.", "success")
+    except: flash("Database Error.", "error")
+    return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
 def signup():
     user_id = request.form.get('id')
-    players = pd.read_csv(CSV_FILE, dtype={'id': str})
-    user_row = players[players['id'] == user_id]
-    if user_row.empty:
-        flash("Code not recognized.", "error")
-        return redirect(url_for('index'))
-    name = f"{user_row.iloc[0]['first']} {user_row.iloc[0]['last']}"
-    try:
-        payload = {'action': 'signup', 'name': name}
-        r = requests.post(GSHEET_API_URL, json=payload, timeout=5)
-        flash(f"SUCCESS: {name} added for Saturday!", "success")
-    except: flash("Database Error: Could not connect to Google Sheets.", "error")
+    r = requests.get(f"{GSHEET_API_URL}?action=validateCode&code={user_id}", timeout=10).json()
+    name = f"{r['first']} {r['last']}"
+    requests.post(GSHEET_API_URL, json={'action': 'signup', 'name': name}, timeout=10)
+    flash(f"SUCCESS: {name} added for Saturday!", "success")
     return redirect(url_for('index'))
 
-# --- NEW ADMIN ACTION: ADD PLAYER ---
-@app.route('/add_player', methods=['POST'])
+@app.route('/admin_dashboard')
 @admin_required
-def add_player():
-    new_id = request.form.get('new_id')
-    first = request.form.get('first')
-    last = request.form.get('last')
-    email = request.form.get('email')
-    
-    players = pd.read_csv(CSV_FILE, dtype={'id': str})
-    if new_id in players['id'].values:
-        flash(f"Error: Code {new_id} is already taken!", "error")
-    else:
-        new_row = pd.DataFrame([{'id': new_id, 'first': first, 'last': last, 'email': email, 'backup_email': '', 'cell': ''}])
-        players = pd.concat([players, new_row], ignore_index=True)
-        players.to_csv(CSV_FILE, index=False)
-        flash(f"Player {first} {last} added successfully!", "success")
-    return redirect(url_for('admin_panel'))
+def admin_dashboard():
+    return render_template('dashboard.html', user={'first': 'Admin'}, is_admin=True)
 
 @app.route('/admin_panel')
 @admin_required
 def admin_panel():
-    players = pd.read_csv(CSV_FILE, dtype={'id': str})
     try:
-        r = requests.get(f"{GSHEET_API_URL}?action=getHistory", timeout=5)
-        history = r.json()
-    except: history = []
-    return render_template('admin.html', players=players.to_dict(orient='records'), history=history)
+        p_req = requests.get(f"{GSHEET_API_URL}?action=getPending", timeout=10).json()
+        hist = requests.get(f"{GSHEET_API_URL}?action=getHistory", timeout=10).json()
+    except: p_req, hist = [], []
+    return render_template('admin.html', pending_list=p_req, history=hist)
+
+@app.route('/approve_player/<player_id>')
+@admin_required
+def approve_player(player_id):
+    requests.get(f"{GSHEET_API_URL}?action=approvePlayer&id={player_id}", timeout=10)
+    flash(f"Player {player_id} approved!", "success")
+    return redirect(url_for('admin_panel'))
 
 if __name__ == "__main__":
     app.run()
