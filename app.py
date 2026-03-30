@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 app.secret_key = "tennis_roster_secure_key"
 
+# --- CONFIGURATION ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbyCzNjCIIkWhJlwU-LlOCq1bZhg-B5HW7B6ketU-E8b87OUQjeKKSp5_OrQHa0F5MWPSw/exec"
 ADMIN_PASSWORD = "jujubeE2" 
 
@@ -61,8 +62,12 @@ def index():
                            target_date=get_next_saturday(),
                            roster=roster_resp)
 
-@app.route('/validate', methods=['POST'])
+@app.route('/validate', methods=['GET', 'POST'])
 def validate():
+    # Prevent crash if user refreshes the page manually
+    if request.method == 'GET':
+        return redirect(url_for('index'))
+
     print("=== VALIDATE ROUTE TRIGGERED ===")
     code = request.form.get('code')
     password = request.form.get('password')
@@ -98,7 +103,6 @@ def validate():
 
 @app.route('/signup', methods=['POST'])
 def signup():
-    # Keep signup simple for now
     if 'user' not in session: return redirect(url_for('index'))
     try:
         requests.post(GAS_URL, json={"action": "signup", "date": get_next_saturday(), "first": session['user']['first'], "last": session['user']['last']}, timeout=5)
