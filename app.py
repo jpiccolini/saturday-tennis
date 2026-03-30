@@ -9,7 +9,6 @@ app = Flask(__name__)
 app.secret_key = "dawson_tennis_admin_key_2026"
 
 # --- CONFIGURATION ---
-# PASTE YOUR FULL https://.../exec URL HERE
 GSHEET_API_URL = "https://script.google.com/macros/s/AKfycby9j5oZGcXUt237ObFs3KXLBJBMI9l9XhpoTIQnfEmAfWjaUqBUan4UhVDkotyr4oRYlQ/exec"
 CSV_FILE = 'players.csv'
 ADMIN_CODE = '0001'
@@ -38,8 +37,7 @@ def index():
     try:
         r = requests.get(f"{GSHEET_API_URL}?action=getRoster", timeout=5)
         current_roster = r.json()
-    except:
-        current_roster = ["Error connecting to Google Sheets"]
+    except: current_roster = []
     return render_template('index.html', weather=get_weather(), roster=current_roster)
 
 @app.route('/login', methods=['POST'])
@@ -47,14 +45,10 @@ def login():
     user_code = request.form.get('code')
     players = pd.read_csv(CSV_FILE, dtype={'id': str})
     user_row = players[players['id'] == user_code]
-    
     if user_row.empty:
         flash("Code not recognized.", "error")
         return redirect(url_for('index'))
-    
-    if user_code == ADMIN_CODE:
-        return redirect(url_for('admin_dashboard'))
-    
+    if user_code == ADMIN_CODE: return redirect(url_for('admin_dashboard'))
     return render_template('dashboard.html', user=user_row.iloc[0], is_admin=False)
 
 @app.route('/admin_dashboard')
@@ -69,38 +63,35 @@ def signup():
     user_id = request.form.get('id')
     players = pd.read_csv(CSV_FILE, dtype={'id': str})
     user_row = players[players['id'] == user_id]
-    
     if user_row.empty:
         flash("Code not recognized.", "error")
         return redirect(url_for('index'))
-
     name = f"{user_row.iloc[0]['first']} {user_row.iloc[0]['last']}"
-    
-    # Send to Google
     try:
         payload = {'action': 'signup', 'name': name}
         r = requests.post(GSHEET_API_URL, json=payload, timeout=5)
-        if "already" in r.text:
-            flash(f"{name}, you are already on the list!", "success")
-        else:
-            flash(f"SUCCESS: {name} added for Saturday!", "success")
-    except:
-        flash("Database Error: Could not connect to Google Sheets.", "error")
-        
+        flash(f"SUCCESS: {name} added for Saturday!", "success")
+    except: flash("Database Error: Could not connect to Google Sheets.", "error")
     return redirect(url_for('index'))
 
-@app.route('/update_profile', methods=['POST'])
-def update_profile():
-    user_id = request.form.get('id')
+# --- NEW ADMIN ACTION: ADD PLAYER ---
+@app.route('/add_player', methods=['POST'])
+@admin_required
+def add_player():
+    new_id = request.form.get('new_id')
+    first = request.form.get('first')
+    last = request.form.get('last')
+    email = request.form.get('email')
+    
     players = pd.read_csv(CSV_FILE, dtype={'id': str})
-    mask = players['id'] == user_id
-    if mask.any():
-        players.loc[mask, 'email'] = request.form.get('email')
-        players.loc[mask, 'backup_email'] = request.form.get('backup_email')
-        players.loc[mask, 'cell'] = request.form.get('cell')
+    if new_id in players['id'].values:
+        flash(f"Error: Code {new_id} is already taken!", "error")
+    else:
+        new_row = pd.DataFrame([{'id': new_id, 'first': first, 'last': last, 'email': email, 'backup_email': '', 'cell': ''}])
+        players = pd.concat([players, new_row], ignore_index=True)
         players.to_csv(CSV_FILE, index=False)
-        flash("Profile updated!", "success")
-    return redirect(url_for('index'))
+        flash(f"Player {first} {last} added successfully!", "success")
+    return redirect(url_for('admin_panel'))
 
 @app.route('/admin_panel')
 @admin_required
