@@ -8,12 +8,14 @@
         .weather { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 20px; color: #4CAF50; border: 1px solid #333; font-size: 1.1em; }
         .box { background: #1e1e1e; padding: 25px; border-radius: 15px; max-width: 400px; margin: 0 auto 20px; border: 1px solid #333; }
         input { padding: 12px; border-radius: 5px; border: 1px solid #444; background: #222; color: white; width: 80%; margin-bottom: 10px; font-size: 16px; }
-        button { padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 85%; }
+        button { padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 85%; margin-top: 10px;}
+        .admin-btn { background: #d32f2f; margin-top: 20px; } /* Red for admin actions */
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 8px; font-weight: bold; max-width: 400px; margin-left: auto; margin-right: auto; }
         .success { background: #2e7d32; color: white; }
         .error { background: #d32f2f; color: white; }
         .roster-box { background: #1e1e1e; padding: 20px; border-radius: 15px; max-width: 400px; margin: 0 auto; border: 1px solid #333; text-align: left; }
         .roster-list { padding-left: 20px; color: #4CAF50; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
@@ -34,19 +36,29 @@
     {% endwith %}
 
     <div class="box">
-        <h3>Weekly Signup</h3>
-        <form action="/signup" method="POST">
-            <input type="text" name="id" placeholder="Enter 4-digit Code" required>
-            <button type="submit">Sign Up for This Saturday</button>
-        </form>
-        <p style="font-size: 0.8em; margin-top: 15px;"><a href="javascript:void(0)" onclick="document.getElementById('login-area').style.display='block'" style="color: #888;">Need to update your email/profile?</a></p>
-        
-        <div id="login-area" style="display:none; margin-top: 20px; border-top: 1px solid #333; padding-top: 20px;">
-            <form action="/login" method="POST">
-                <input type="text" name="code" placeholder="Enter Code">
-                <button type="submit" style="background: #555;">Edit My Info</button>
+        {% if not session.get('user') %}
+            <h3>Enter Player Code</h3>
+            <form action="/validate" method="POST">
+                <input type="text" name="code" placeholder="4-digit Code (e.g. 1001)" required>
+                <button type="submit">Verify My Code</button>
             </form>
-        </div>
+        {% else %}
+            <h3>Welcome, {{ session['user']['first'] }}!</h3>
+            <p style="color: #4CAF50;">Targeting Sat: {{ target_date }}</p>
+            
+            <form action="/signup" method="POST">
+                <button type="submit">Confirm Sign Up</button>
+            </form>
+
+            <a href="/logout" style="color: #888; font-size: 0.8em; display: block; margin-top: 15px;">Not you? Switch User</a>
+        {% endif %}
+
+        {% if session.get('is_admin') %}
+            <div style="margin-top: 20px; border-top: 1px solid #444; padding-top: 10px;">
+                <h4 style="color: #FFD700;">Admin Controls</h4>
+                <button class="admin-btn" onclick="alert('Admin: Logic to clear sheet can go here!')">Clear Roster for Next Week</button>
+            </div>
+        {% endif %}
     </div>
 
     <div class="roster-box">
@@ -54,7 +66,7 @@
         {% if roster %}
             <ol class="roster-list">
             {% for player in roster %}
-                <li>{{ player }}</li>
+                <li>{{ player.name }} <span style="color: #666; font-size: 0.8em;">({{ player.date }})</span></li>
             {% endfor %}
             </ol>
         {% else %}
