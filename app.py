@@ -7,56 +7,69 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 app.secret_key = "tennis_roster_secure_key"
 
-# --- CONFIGURATION ---
-GAS_URL = "https://script.google.com/macros/s/AKfycbzFo0KsTgzrGrCYVJ5-A9ymvm_OSdNecEgy9a3cu4MraKUtrTNF_3YQstOp4tYGWu84SQ/exec"
+# --- AIRTABLE CONFIGURATION ---
+# We use os.environ.get so GitHub doesn't see the password!
+AIRTABLE_PAT = os.environ.get("AIRTABLE_PAT")
+BASE_ID = "appEC9INt2PRYewNj"
+
+HEADERS = {
+    "Authorization": f"Bearer {AIRTABLE_PAT}",
+    "Content-Type": "application/json"
+}
 ADMIN_PASSWORD = "jujubeE2" 
 
 def get_next_saturday():
-    """Calculates the date of the upcoming Saturday."""
     today = datetime.now()
     days_ahead = (5 - today.weekday() + 7) % 7
     if days_ahead == 0: days_ahead = 7
     return (today + timedelta(days_ahead)).strftime('%b %d, %Y')
 
 def get_weather_forecast(time_str):
-    """Fetches weather using Open-Meteo with a User-Agent so Render isn't blocked."""
     print("-> Fetching Weather...")
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&current_weather=true"
-        # The fake ID so the API doesn't block us
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"} 
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
-        
-        temp_c = data['current_weather']['temperature']
+        response = requests.get(url, headers=headers, timeout=10).json()
+        temp_c = response['current_weather']['temperature']
         temp_f = int((temp_c * 9/5) + 32)
-        print("-> Weather fetched successfully.")
         return f" | Current Temp: {temp_f}°F"
     except Exception as e:
         print(f"-> Weather failed: {e}")
-        return "" # Fails silently so it doesn't break the header
+        return ""
 
 @app.route('/')
 def index():
     print("=== LOADING INDEX PAGE ===")
     
-    print("-> Fetching Schedule from Google...")
+    # 1. Fetch Schedule from Airtable
+    print("-> Fetching Schedule from Airtable...")
+    display_start = "8:45 AM"
     try:
-        sched_resp = requests.get(f"{GAS_URL}?action=getSchedule", timeout=15).json()
-        raw_time = sched_resp.get('startTime', '8:45 AM')
-        time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', str(raw_time), re.IGNORECASE)
-        display_start = time_match.group(1).upper() if time_match else "8:45 AM"
+        url = f"https://api.airtable.com/v0/{BASE_ID}/settings?filterByFormula=Setting='StartTime'"
+        response = requests.get(url, headers=HEADERS, timeout=10).json()
+        if 'records' in response and len(response['records']) > 0:
+            raw_time = response['records'][0]['fields'].get('Value', '8:45 AM')
+            time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', str(raw_time), re.IGNORECASE)
+            display_start = time_match.group(1).upper() if time_match else "8:45 AM"
     except Exception as e:
         print(f"-> Schedule fetch failed: {e}")
-        display_start = "8:45 AM"
 
-    print("-> Fetching Roster from Google...")
+    # 2. Fetch Roster from Airtable
+    print("-> Fetching Roster from Airtable...")
+    roster_list = []
     try:
-        roster_resp = requests.get(f"{GAS_URL}?action=getPlayers", timeout=15).json()
+        url = f"https://api.airtable.com/v0/{BASE_ID}/signups"
+        response = requests.get(url, headers=HEADERS, timeout=10).json()
+        if 'records' in response:
+            for record in response['records']:
+                fields = record.get('fields', {})
+                if 'First' in fields and 'Last' in fields:
+                    roster_list.append({
+                        "first": fields['First'],
+                        "last": fields['Last']
+                    })
     except Exception as e:
         print(f"-> Roster fetch failed: {e}")
-        roster_resp = []
 
     weather_text = get_weather_forecast(display_start)
 
@@ -64,57 +77,88 @@ def index():
                            weather=weather_text, 
                            start_time=display_start,
                            target_date=get_next_saturday(),
-                           roster=roster_resp)
+                           roster=roster_list)
 
 @app.route('/validate', methods=['GET', 'POST'])
 def validate():
     if request.method == 'GET':
         return redirect(url_for('index'))
 
-    code = request.form.get('code')
-    password = request.form.get('password')
+    code = request.form.get('code', '').strip()
+    password = request.form.get('password', '')
 
+    print(f"-> Validating code: {code} via Airtable")
     try:
-        response = requests.get(f"{GAS_URL}?action=validateCode&code={code}", timeout=15)
+        url = f"https://api.airtable.com/v0/{BASE_ID}/master_list?filterByFormula=Code='{code}'"
+        response = requests.get(url, headers=HEADERS, timeout=10).json()
         
-        # If Google returns an HTML login page instead of data, catch it here:
-        if "text/html" in response.headers.get('content-type', '').lower():
-            flash("Google blocked the connection. Set 'Who has access' to 'Anyone'.", "error")
-            return redirect(url_for('index'))
+        if 'records' in response and len(response['records']) > 0:
+            user_data = response['records'][0]['fields']
             
-        data = response.json()
-
-        if data.get('found'):
             if str(code) == "9999":
                 if password == ADMIN_PASSWORD:
-                    session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': True}
+                    session['user'] = {'first': user_data.get('First', 'Admin'), 'last': user_data.get('Last', 'User'), 'is_admin': True}
                     flash("Admin Access Granted", "success")
                 else:
                     flash("Incorrect Admin Password", "error")
             else:
-                session['user'] = {'first': data['first'], 'last': data['last'], 'is_admin': False}
+                session['user'] = {'first': user_data.get('First', 'Unknown'), 'last': user_data.get('Last', 'Unknown'), 'is_admin': False}
         else:
             flash("Invalid Player Code", "error")
             
     except Exception as e:
-        print(f"-> EXCEPTION in validate: {str(e)}")
-        flash("Google connection timed out. Please try again.", "error")
+        print(f"-> EXCEPTION in validate: {e}")
+        flash("Database connection error. Please try again.", "error")
     
     return redirect(url_for('index'))
 
-# ... (keep your signup, update_time, and logout routes the exact same) ...
 @app.route('/signup', methods=['POST'])
 def signup():
-    if 'user' not in session: return redirect(url_for('index'))
-    try: requests.post(GAS_URL, json={"action": "signup", "date": get_next_saturday(), "first": session['user']['first'], "last": session['user']['last']}, timeout=15)
-    except: pass
+    if 'user' not in session: 
+        return redirect(url_for('index'))
+    try:
+        url = f"https://api.airtable.com/v0/{BASE_ID}/signups"
+        payload = {
+            "records": [{
+                "fields": {
+                    "Date": get_next_saturday(),
+                    "First": session['user']['first'],
+                    "Last": session['user']['last']
+                }
+            }]
+        }
+        requests.post(url, headers=HEADERS, json=payload, timeout=10)
+        flash("Successfully signed up!", "success")
+    except Exception as e:
+        print(f"-> Signup failed: {e}")
+        flash("Signup failed.", "error")
     return redirect(url_for('index'))
 
 @app.route('/update_time', methods=['POST'])
 def update_time():
-    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    try: requests.post(GAS_URL, json={"action": "updateSchedule", "hour": request.form.get('time_string')}, timeout=15)
-    except: pass
+    if not session.get('user', {}).get('is_admin'): 
+        return redirect(url_for('index'))
+    
+    new_time = request.form.get('time_string')
+    try:
+        # Step 1: Find the specific record ID for the StartTime setting
+        get_url = f"https://api.airtable.com/v0/{BASE_ID}/settings?filterByFormula=Setting='StartTime'"
+        get_resp = requests.get(get_url, headers=HEADERS, timeout=10).json()
+        
+        if 'records' in get_resp and len(get_resp['records']) > 0:
+            record_id = get_resp['records'][0]['id']
+            
+            # Step 2: Update that specific record
+            patch_url = f"https://api.airtable.com/v0/{BASE_ID}/settings/{record_id}"
+            payload = {"fields": {"Value": new_time}}
+            requests.patch(patch_url, headers=HEADERS, json=payload, timeout=10)
+            flash("Start time updated!", "success")
+        else:
+            flash("Settings row not found in Airtable.", "error")
+    except Exception as e:
+        print(f"-> Update time failed: {e}")
+        flash("Failed to update.", "error")
+        
     return redirect(url_for('index'))
 
 @app.route('/logout')
