@@ -1,188 +1,182 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Saturday Tennis Roster</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f9; color: #333; }
-        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        h2, h3, h4 { text-align: center; color: #2c3e50; }
-        .header-section { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 15px; }
-        .flash-message { padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center; }
-        .success { background-color: #d4edda; color: #155724; }
-        .error { background-color: #f8d7da; color: #721c24; }
-        form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-        input, button, textarea { padding: 10px; font-size: 1em; border-radius: 5px; border: 1px solid #ccc; }
-        button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: 0.3s; }
-        button:hover { background-color: #2980b9; }
-        .roster-list { list-style-type: none; padding: 0; margin: 0; }
-        .roster-list li { background: #ecf0f1; margin: 5px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;}
-        .court-box { border: 2px solid #bdc3c7; border-radius: 8px; margin-bottom: 15px; padding: 15px; background: #fafafa; }
-        .court-header { margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; color: #2980b9; font-size: 1.1em; font-weight: bold; }
-        .admin-panel { background: #e8f4f8; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #bce8f1; }
-        .pending-tag { color: #d35400; font-size: 0.85em; font-weight: bold; background: #fdebd0; padding: 2px 6px; border-radius: 4px; }
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .container { max-width: 800px; margin-top: 30px; padding-bottom: 50px; }
+        .header-card { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; margin-bottom: 25px; }
+        .weather-badge { background: #e8f4fd; color: #2980b9; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9em; }
+        
+        .court-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .court-box { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #27ae60; }
+        .court-header { font-weight: bold; color: #27ae60; border-bottom: 1px solid #eee; margin-bottom: 10px; padding-bottom: 5px; display: flex; justify-content: space-between; }
+        
+        .waitlist-box { border-left-color: #f39c12; background: #fffdf9; }
+        .waitlist-header { color: #d35400; }
+        
+        .injury-box { border-left-color: #e74c3c; background: #fff5f5; margin-top: 20px; }
+        .injury-header { color: #c0392b; }
+
+        .roster-list { list-style: none; padding: 0; margin: 0; }
+        .roster-list li { padding: 8px 0; border-bottom: 1px solid #fafafa; display: flex; justify-content: space-between; }
+        .status-pending { color: #f39c12; font-style: italic; font-size: 0.8em; }
+        
+        .login-box { background: white; border-radius: 15px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .admin-controls { background: #34495e; color: white; border-radius: 12px; padding: 20px; margin-top: 30px; }
+        
+        #admin-password-group { display: none; margin-top: 10px; }
+        .strike-warning { color: #e74c3c; font-weight: bold; font-size: 0.9em; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
-
-<div class="container">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="flash-message {{ category }}">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <div class="header-section">
-        <h2>Saturday Tennis Gang @ Dawson School</h2>
-        <h3 style="color: #2c3e50; font-size: 1.5em; margin-bottom: 5px;">
-            Saturday, {{ target_date }} {{ start_time }} - 11 AM
-        </h3>
-        <p style="font-size: 1.1em; color: #555; margin-top: 0;">
-            {{ weather }}
-        </p>
-    </div>
-
-    {% if not session.user %}
-        <form action="/validate" method="POST">
-            <label>Enter 4-Digit Player Code:</label>
-            <input type="text" name="code" required pattern="\d{4}" title="Please enter exactly 4 digits.">
-            <label>Admin Password (leave blank if player):</label>
-            <input type="password" name="password">
-            <button type="submit">Log In</button>
-        </form>
-    {% else %}
-        <div style="text-align: center; margin-bottom: 20px;">
-            <p>Welcome, <strong>{{ session.user.first }}</strong>!</p>
+    <div class="container">
+        <div class="header-card">
+            <h1>🎾 Saturday Tennis</h1>
+            <p class="text-muted">{{ target_date }} @ {{ start_time }}</p>
+            <span class="weather-badge">🌤 {{ weather }}</span>
             
-            {% set current_user_playing = roster | selectattr("First", "equalto", session.user.first) | selectattr("Last", "equalto", session.user.last) | list %}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                {% for category, message in messages %}
+                  <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} mt-3">{{ message }}</div>
+                {% endfor %}
+              {% endif %}
+            {% endwith %}
+        </div>
+
+        {% if not session.user %}
+        <div class="login-box">
+            <form action="/validate" method="POST">
+                <div class="mb-3">
+                    <label class="form-label">Enter Player Code to Join/Drop</label>
+                    <input type="text" name="code" id="player-code" class="form-control form-control-lg" placeholder="e.g. 1234" required>
+                </div>
+                <div id="admin-password-group" class="mb-3">
+                    <label class="form-label">Admin Password</label>
+                    <input type="password" name="password" class="form-control" placeholder="Required for Code 9999">
+                </div>
+                <button type="submit" class="btn btn-primary w-100 btn-lg">Continue</button>
+            </form>
+        </div>
+        {% else %}
+        <div class="header-card">
+            <h4>Welcome, {{ session.user.first }}!</h4>
             
-            {% if current_user_playing %}
-                {% if is_past_deadline %}
-                    {% if has_waitlist %}
-                        <form action="/cancel" method="POST" style="display: inline-block; width: 48%;">
-                            <button type="submit" style="background-color: #8e44ad; font-size: 0.9em; padding: 10px 5px;">Drop (Waitlist Sub)</button>
-                        </form>
-                    {% else %}
-                        <form action="/provide_sub" method="POST" style="display: inline-block; width: 48%;" onsubmit="return promptSub(this);">
-                            <input type="hidden" name="sub_name" id="sub_name_input">
-                            <button type="submit" style="background-color: #d35400; font-size: 0.9em; padding: 10px 5px;">Provide Sub Info</button>
-                        </form>
-                        <script>
-                            function promptSub(form) {
-                                var sub = prompt("It is past Friday 8 AM. Please enter the name of the person subbing for you:");
-                                if (sub) {
-                                    document.getElementById('sub_name_input').value = sub;
-                                    return true;
-                                }
-                                return false;
-                            }
-                        </script>
-                    {% endif %}
+            {% if strikes > 0 %}
+                <div class="strike-warning">⚠️ Strike Count: {{ strikes }} (3 strikes = Suspension)</div>
+            {% endif %}
+
+            <div class="d-grid gap-2 d-md-block mt-3">
+                {% set player_in_roster = roster | selectattr("Player Code", "equalto", session.user.code | int) | list %}
+                {% if not player_in_roster %}
+                    <form action="/signup" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-success btn-lg" {% if strikes >= 3 %}disabled{% endif %}>
+                            {% if strikes >= 3 %}Blocked (3 Strikes){% else %}Sign Up for This Week{% endif %}
+                        </button>
+                    </form>
                 {% else %}
-                    <form action="/cancel" method="POST" style="display: inline-block; width: 48%;">
-                        <button type="submit" style="background-color: #f39c12;">Drop Out</button>
+                    <form action="/cancel" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-danger btn-lg">Drop Out</button>
                     </form>
                 {% endif %}
-            {% else %}
-                <form action="/signup" method="POST" style="display: inline-block; width: 48%;">
-                    <button type="submit" style="background-color: #27ae60;">Sign Up to Play</button>
-                </form>
-            {% endif %}
-            
-            <a href="/logout" style="display: inline-block; width: 48%; text-align: center; text-decoration: none;">
-                <button type="button" style="background-color: #e74c3c; width: 100%;">Log Out</button>
-            </a>
+                <a href="/logout" class="btn btn-outline-secondary">Logout</a>
+            </div>
         </div>
-    {% endif %}
+        {% endif %}
 
-    <hr>
-    <h4>Who's Playing?</h4>
-    {% if roster %}
-        
-        {% set active_players = roster | selectattr('Status', 'in', ['Confirmed', 'Pending']) | list %}
-        {% set waitlist_players = roster | selectattr('Status', 'equalto', 'Waitlist') | list %}
-
-        {% for court in active_players | batch(4) %}
+        <h3 class="mb-3">Live Roster</h3>
+        <div class="court-grid">
+            {% for i in range(0, 24, 4) %}
             <div class="court-box">
                 <div class="court-header">
-                    {% if court|length == 4 %}
-                        Court {{ loop.index }}
-                    {% else %}
-                        Court {{ loop.index }} (Incomplete)
-                    {% endif %}
+                    <span>Court {{ (i/4)|int + 1 }}</span>
+                    <small>{{ roster[i:i+4]|length }}/4</small>
                 </div>
                 <ul class="roster-list">
-                    {% for player in court %}
+                    {% for j in range(i, i+4) %}
                         <li>
-                            <span>{{ player.First }} {{ player.Last }}</span>
-                            {% if player.Status == 'Pending' %}
-                                <span class="pending-tag">Pending</span>
+                            {% if roster[j] %}
+                                <span>{{ roster[j].First }} {{ roster[j].Last }}</span>
+                                {% if roster[j].Status == 'Pending' %}<span class="status-pending">[Pending]</span>{% endif %}
+                            {% else %}
+                                <span class="text-muted small">Open Spot</span>
                             {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             </div>
-        {% endfor %}
+            {% endfor %}
+        </div>
 
-        {% if waitlist_players %}
-            <div class="court-box" style="border-color: #7f8c8d; background: #fdfdfd;">
-                <div class="court-header" style="color: #7f8c8d;">
-                    Waitlist
-                </div>
-                <ul class="roster-list">
-                    {% for player in waitlist_players %}
-                        <li style="color: #555;">{{ player.First }} {{ player.Last }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-        {% endif %}
-
-        <p style="text-align: center; color: #7f8c8d; font-size: 0.9em;">
-            Total Active: {{ active_players|length }} / 24 | Waitlist: {{ waitlist_players|length }}
-        </p>
-    {% else %}
-        <p style="text-align: center; color: #7f8c8d;">No one has signed up yet for this week. Be the first!</p>
-    {% endif %}
-
-    {% if session.user and session.user.is_admin %}
-    <div class="admin-panel">
-        <h4>Admin Controls</h4>
-        
-        {% if drafts %}
-            <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #ffeeba;">
-                <h5 style="margin-top: 0; color: #856404; text-align: center;">📥 Pending Message Drafts</h5>
-                {% for msg in drafts %}
-                <form action="/approve_message" method="POST" style="background: white; padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
-                    <input type="hidden" name="msg_id" value="{{ msg.id }}">
-                    <p style="margin: 0 0 10px 0;"><strong>Type:</strong> {{ msg.Type }}</p>
-                    <label>Subject:</label>
-                    <input type="text" name="subject" value="{{ msg.Subject }}" required>
-                    <label>Message Body:</label>
-                    <textarea name="body" rows="6" required style="font-family: inherit;">{{ msg.Body }}</textarea>
-                    <button type="submit" style="background: #28a745;">Approve & Queue for Sending</button>
-                </form>
+        {% if roster|length > 24 %}
+        <div class="court-box waitlist-box mt-4">
+            <div class="court-header waitlist-header">First-Come Waitlist</div>
+            <ul class="roster-list">
+                {% for player in roster[24:] %}
+                <li>
+                    <span>{{ player.First }} {{ player.Last }}</span>
+                    <span class="badge bg-warning text-dark">#{{ loop.index }}</span>
+                </li>
                 {% endfor %}
-            </div>
-        {% else %}
-            <p style="text-align: center; color: #7f8c8d; font-size: 0.9em;">No pending messages to approve.</p>
+            </ul>
+        </div>
         {% endif %}
 
-        <form action="/update_settings" method="POST" style="background: white; padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
-            <h5 style="margin-top: 0; text-align: center;">Update Schedule</h5>
-            <label>Date (e.g., Apr 04, 2026):</label>
-            <input type="text" name="date_string" value="{{ target_date }}" required>
-            <label>Start Time:</label>
-            <input type="text" name="time_string" value="{{ start_time }}" required>
-            <button type="submit">Update Schedule</button>
-        </form>
-    </div>
-    {% endif %}
+        {% if injured_players %}
+        <div class="court-box injury-box">
+            <div class="court-header injury-header">🚑 Injured List (IL)</div>
+            <ul class="roster-list">
+                {% for p in injured_players %}
+                <li>
+                    <span>{{ p.First }} {{ p.Last }}</span>
+                    <small class="text-danger">Expected: {{ p['Expected Return'] }}</small>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
 
-</div>
+        {% if session.user and session.user.is_admin %}
+        <div class="admin-controls">
+            <h4>Admin Dashboard</h4>
+            <hr>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <h6>Update Game Info</h6>
+                    <form action="/update_settings" method="POST">
+                        <input type="text" name="target_date" class="form-control mb-2" placeholder="Mar 28, 2026" value="{{ target_date }}">
+                        <input type="text" name="start_time" class="form-control mb-2" placeholder="9:00 AM" value="{{ start_time }}">
+                        <button type="submit" class="btn btn-sm btn-info w-100">Sync Settings</button>
+                    </form>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <h6>Report Injury</h6>
+                    <form action="/report_injury" method="POST">
+                        <input type="text" name="player_code" class="form-control mb-2" placeholder="Player Code">
+                        <input type="text" name="return_date" class="form-control mb-2" placeholder="Return Date (e.g. May 1)">
+                        <button type="submit" class="btn btn-sm btn-warning w-100">Mark as Injured</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        const codeInput = document.getElementById('player-code');
+        const passwordGroup = document.getElementById('admin-password-group');
+
+        codeInput.addEventListener('input', function() {
+            if (this.value === '9999') {
+                passwordGroup.style.display = 'block';
+            } else {
+                passwordGroup.style.display = 'none';
+            }
+        });
+    </script>
 </body>
 </html>
-```
