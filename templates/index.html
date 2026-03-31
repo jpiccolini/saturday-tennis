@@ -1,3 +1,8 @@
+Here is the complete, integrated `index.html` file. It includes the new 24-player cap logic, the separate Waitlist display, the `[Pending]` visual tags, and all of the dynamic buttons based on the Friday deadline.
+
+Copy this entirely and replace the contents of your `templates/index.html` file:
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,10 +22,11 @@
         button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: 0.3s; }
         button:hover { background-color: #2980b9; }
         .roster-list { list-style-type: none; padding: 0; margin: 0; }
-        .roster-list li { background: #ecf0f1; margin: 5px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between;}
+        .roster-list li { background: #ecf0f1; margin: 5px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;}
         .court-box { border: 2px solid #bdc3c7; border-radius: 8px; margin-bottom: 15px; padding: 15px; background: #fafafa; }
         .court-header { margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; color: #2980b9; font-size: 1.1em; font-weight: bold; }
         .admin-panel { background: #e8f4f8; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #bce8f1; }
+        .pending-tag { color: #d35400; font-size: 0.85em; font-weight: bold; background: #fdebd0; padding: 2px 6px; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -100,23 +106,48 @@
     <hr>
     <h4>Who's Playing?</h4>
     {% if roster %}
-        {% for court in roster | batch(4) %}
+        
+        {% set active_players = roster | selectattr('Status', 'in', ['Confirmed', 'Pending']) | list %}
+        {% set waitlist_players = roster | selectattr('Status', 'equalto', 'Waitlist') | list %}
+
+        {% for court in active_players | batch(4) %}
             <div class="court-box">
                 <div class="court-header">
                     {% if court|length == 4 %}
                         Court {{ loop.index }}
                     {% else %}
-                        Waitlist / Incomplete Court
+                        Court {{ loop.index }} (Incomplete)
                     {% endif %}
                 </div>
                 <ul class="roster-list">
                     {% for player in court %}
-                        <li>{{ player.First }} {{ player.Last }}</li>
+                        <li>
+                            <span>{{ player.First }} {{ player.Last }}</span>
+                            {% if player.Status == 'Pending' %}
+                                <span class="pending-tag">Pending</span>
+                            {% endif %}
+                        </li>
                     {% endfor %}
                 </ul>
             </div>
         {% endfor %}
-        <p style="text-align: center; color: #7f8c8d; font-size: 0.9em;">Total Players: {{ roster|length }}</p>
+
+        {% if waitlist_players %}
+            <div class="court-box" style="border-color: #7f8c8d; background: #fdfdfd;">
+                <div class="court-header" style="color: #7f8c8d;">
+                    Waitlist
+                </div>
+                <ul class="roster-list">
+                    {% for player in waitlist_players %}
+                        <li style="color: #555;">{{ player.First }} {{ player.Last }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        <p style="text-align: center; color: #7f8c8d; font-size: 0.9em;">
+            Total Active: {{ active_players|length }} / 24 | Waitlist: {{ waitlist_players|length }}
+        </p>
     {% else %}
         <p style="text-align: center; color: #7f8c8d;">No one has signed up yet for this week. Be the first!</p>
     {% endif %}
@@ -158,3 +189,4 @@
 </div>
 </body>
 </html>
+```
