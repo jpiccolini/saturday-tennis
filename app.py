@@ -17,22 +17,29 @@ ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 GMAIL_USER = os.environ.get("GMAIL_USER")
 GMAIL_PASSWORD = os.environ.get("GMAIL_PASSWORD")
 
-HEADERS = {
-    "Authorization": f"Bearer {AIRTABLE_API_KEY}",
-    "Content-Type": "application/json"
-}
+HEADERS = {"Authorization": f"Bearer {AIRTABLE_API_KEY}", "Content-Type": "application/json"}
 
-# --- Helper Functions ---
+# --- ROBUST AIRTABLE FETCHING ---
+def get_airtable_data(table_name):
+    """Tries the table name as-is, then with spaces, then lowercase."""
+    # Try exact, then with space, then lowercase underscore
+    possible_names = [table_name, table_name.replace("_", " ").title(), table_name.lower()]
+    for name in possible_names:
+        url = f"https://api.airtable.com/v0/{BASE_ID}/{name.replace(' ', '%20')}"
+        resp = requests.get(url, headers=HEADERS)
+        if resp.status_code == 200:
+            return resp.json().get('records', [])
+    print(f"ERROR: Could not find table {table_name} after trying multiple variations.")
+    return []
+
 def get_weather_forecast(date_str, time_str):
-    if not date_str or "TBD" in date_str:
-        return "Weather unavailable (Date not set)."
+    if not date_str or "TBD" in date_str: return "Weather unavailable."
     try:
-        # Try to parse the date flexibly
         target_dt = datetime.strptime(f"{date_str} {time_str}", "%b %d, %Y %I:%M %p")
         url = f"https://api.weatherapi.com/v1/forecast.json?key={WEATHER_API_KEY}&q=Lafayette,CO&days=10"
         response = requests.get(url).json()
         target_date_string = target_dt.strftime("%Y-%m-%d")
-        for day in response['forecast']['forecastday']:
+        for day in response.get('forecast', {}).get('forecastday', []):
             if day['date'] == target_date_string:
                 for hour in day['hour']:
                     hour_dt = datetime.strptime(hour['time'], "%Y-%m-%d %H:%M")
@@ -43,11 +50,8 @@ def get_weather_forecast(date_str, time_str):
 
 def send_email(to_email, bcc_list, subject, body):
     try:
-        msg = EmailMessage()
-        msg.set_content(body)
-        msg['Subject'] = subject
-        msg['From'] = GMAIL_USER
-        msg['To'] = to_email
+        msg = EmailMessage(); msg.set_content(body); msg['Subject'] = subject
+        msg['From'] = GMAIL_USER; msg['To'] = to_email
         if bcc_list: msg['Bcc'] = ", ".join(bcc_list)
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(GMAIL_USER, GMAIL_PASSWORD)
@@ -55,44 +59,28 @@ def send_email(to_email, bcc_list, subject, body):
         return True
     except: return False
 
-def get_player_email(player_code):
-    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
-    for r in master_resp.get('records', []):
-        if str(r['fields'].get('Code')) == str(player_code):
-            return r['fields'].get('Email')
-    return None
-
-def get_all_master_emails():
-    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
-    return [r['fields'].get('Email') for r in master_resp.get('records', []) if r['fields'].get('Email')]
-
 # --- Core Web Routes ---
 @app.route('/')
 def index():
     # 1. Get Settings
-    settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
+    settings_records = get_airtable_data("Settings")
     display_date = "TBD"
     display_start = "TBD"
-    if 'records' in settings_resp and len(settings_resp['records']) > 0:
-        f = settings_resp['records'][0]['fields']
-        # Flexibility for field names with spaces
+    if settings_records:
+        f = settings_records[0]['fields']
         display_date = f.get('target_date') or f.get('Target Date') or "TBD"
         display_start = f.get('start_time') or f.get('Start Time') or "TBD"
 
     # 2. Get Roster
-    signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
+    signup_records = get_airtable_data("Signups")
     roster_list = []
-    for r in signups_resp.get('records', []):
+    for r in signup_records:
         fields = r['fields']
-        # If Status is empty, default it to "Confirmed" so they show up!
-        if not fields.get('Status'):
-            fields['Status'] = 'Confirmed'
+        if not fields.get('Status'): fields['Status'] = 'Confirmed'
         roster_list.append(fields)
 
-    # 3. Weather
+    # 3. Weather & Deadline
     weather_text = get_weather_forecast(display_date, display_start)
-
-    # 4. Deadline Check
     is_past_deadline = False
     try:
         target_dt = datetime.strptime(display_date, "%b %d, %Y")
@@ -100,43 +88,38 @@ def index():
         is_past_deadline = datetime.now() >= deadline_dt
     except: pass
     
-    has_waitlist = len(roster_list) > 24 or (len(roster_list) % 4 != 0)
+    has_waitlist = len(roster_list) > 24
 
     drafts = []
     if 'user' in session and session['user'].get('is_admin'):
-        messages_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/messages", headers=HEADERS).json()
-        for r in messages_resp.get('records', []):
+        msg_records = get_airtable_data("Messages")
+        for r in msg_records:
             if r['fields'].get('Status') == 'Draft':
-                draft_data = r['fields']
-                draft_data['id'] = r['id']
-                drafts.append(draft_data)
+                d = r['fields']; d['id'] = r['id']; drafts.append(d)
 
     return render_template('index.html', weather=weather_text, start_time=display_start, target_date=display_date, roster=roster_list, drafts=drafts, is_past_deadline=is_past_deadline, has_waitlist=has_waitlist)
 
 @app.route('/validate', methods=['POST'])
 def validate():
-    code = request.form.get('code')
+    code = request.form.get('code', '').strip()
     password = request.form.get('password')
-    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
     
-    for record in master_resp.get('records', []):
-        fields = record.get('fields', {})
-        # Compare as strings to avoid type issues
-        if str(fields.get('Code')) == str(code):
+    master_records = get_airtable_data("Master List")
+    
+    if not master_records:
+        flash("System Error: Could not connect to Master List. Check Table Names.", "error")
+        return redirect(url_for('index'))
+
+    for record in master_records:
+        f = record.get('fields', {})
+        # Check 'Code' or 'code'
+        db_code = str(f.get('Code') or f.get('code') or '')
+        if db_code == code:
             is_admin = (password == ADMIN_PW) if password else False
-            if password and not is_admin:
-                flash("Incorrect Admin Password.", "error")
-                return redirect(url_for('index'))
-            
-            session['user'] = {
-                'first': fields.get('First'),
-                'last': fields.get('Last'),
-                'code': code,
-                'is_admin': is_admin
-            }
+            session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
             return redirect(url_for('index'))
             
-    flash(f"Code {code} not found in Master List.", "error")
+    flash(f"Code {code} not found. We checked {len(master_records)} records in the Master List.", "error")
     return redirect(url_for('index'))
 
 @app.route('/logout')
@@ -144,5 +127,4 @@ def logout():
     session.pop('user', None)
     return redirect(url_for('index'))
 
-# ... [KEEP ALL REMAINING ROUTES FROM THE PREVIOUS CODE BLOCK] ...
-# (Signup, Cancel, Action, Update Settings, Cron Routes remain the same)
+# ... [Keep other functional routes from previous version] ...
