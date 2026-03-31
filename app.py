@@ -1,107 +1,88 @@
 import os
 import requests
-import re
-import smtplib
-from email.mime.text import MIMEText
-from flask import Flask, render_template, request, session, flash, redirect, url_for
+from flask import Flask, render_template, request, session, redirect, url_for, flash
 from datetime import datetime, timedelta
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
-app.secret_key = "tennis_roster_secure_key"
+app.secret_key = os.environ.get("FLASK_SECRET", "supersecretkey")
 
-# --- CONFIGURATION ---
-AIRTABLE_PAT = os.environ.get("AIRTABLE_PAT")
-BASE_ID = "appEC9INt2PRYewNj"
-HEADERS = {"Authorization": f"Bearer {AIRTABLE_PAT}", "Content-Type": "application/json"}
-ADMIN_PASSWORD = "jujubeE2" 
+# --- Environment Variables ---
+AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
+BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
+WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
+ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
+GMAIL_USER = os.environ.get("GMAIL_USER")
+GMAIL_PASSWORD = os.environ.get("GMAIL_PASSWORD")
 
-GMAIL_USER = os.environ.get("GMAIL_ADDRESS")
-GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD")
+HEADERS = {
+    "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+    "Content-Type": "application/json"
+}
 
-# --- HELPER FUNCTIONS ---
-def get_weather_icon(code):
-    if code == 0: return "☀️", "Clear"
-    elif code in [1, 2, 3]: return "⛅", "Partly Cloudy"
-    elif code in [45, 48]: return "🌫️", "Foggy"
-    elif code in [51, 53, 55, 56, 57]: return "🌧️", "Drizzle"
-    elif code in [61, 63, 65, 66, 67, 80, 81, 82]: return "🌧️", "Rain"
-    elif code in [71, 73, 75, 77, 85, 86]: return "❄️", "Snow"
-    elif code in [95, 96, 99]: return "⛈️", "Thunderstorm"
-    return "🌡️", "Unknown"
-
+# --- Helper Functions ---
 def get_weather_forecast(date_str, time_str):
     try:
-        dt_str = f"{date_str} {time_str}"
-        target_dt = datetime.strptime(dt_str, "%b %d, %Y %I:%M %p")
-        start_hour_str = target_dt.strftime("%Y-%m-%dT%H:00")
-        end_dt = target_dt + timedelta(hours=2)
-        end_hour_str = end_dt.strftime("%Y-%m-%dT%H:00")
-
-        url = "https://api.open-meteo.com/v1/forecast?latitude=39.9936&longitude=-105.0897&hourly=temperature_2m,weathercode&temperature_unit=fahrenheit&timezone=America%2FDenver"
-        headers = {"User-Agent": "Mozilla/5.0"} 
-        data = requests.get(url, headers=headers, timeout=10).json()
-        times = data['hourly']['time']
+        # Convert "Apr 04, 2026" and "8:45 AM" into a target datetime
+        target_dt = datetime.strptime(f"{date_str} {time_str}", "%b %d, %Y %I:%M %p")
         
-        if start_hour_str in times:
-            s_idx = times.index(start_hour_str)
-            e_idx = times.index(end_hour_str) if end_hour_str in times else s_idx + 2
-            
-            s_temp, s_code = int(data['hourly']['temperature_2m'][s_idx]), data['hourly']['weathercode'][s_idx]
-            e_temp, e_code = int(data['hourly']['temperature_2m'][e_idx]), data['hourly']['weathercode'][e_idx]
-            s_icon, s_cond = get_weather_icon(s_code)
-            e_icon, e_cond = get_weather_icon(e_code)
-            
-            return f"{s_icon} Start: {s_temp}°F ({s_cond})  |  {e_icon} End: {e_temp}°F ({e_cond})"
-        return "Weather forecast unavailable yet."
-    except: return "Weather currently unavailable."
+        url = f"https://api.weatherapi.com/v1/forecast.json?key={WEATHER_API_KEY}&q=Lafayette,CO&days=10"
+        response = requests.get(url).json()
+        
+        target_date_string = target_dt.strftime("%Y-%m-%d")
+        for day in response['forecast']['forecastday']:
+            if day['date'] == target_date_string:
+                for hour in day['hour']:
+                    # Find the closest hour
+                    hour_dt = datetime.strptime(hour['time'], "%Y-%m-%d %H:%M")
+                    if hour_dt.hour == target_dt.hour:
+                        temp = int(hour['temp_f'])
+                        condition = hour['condition']['text']
+                        wind = int(hour['wind_mph'])
+                        return f"{temp}°F, {condition}, Wind {wind} mph"
+        return "Forecast not available yet (too far out)."
+    except Exception as e:
+        return "Weather data temporarily unavailable."
 
-def send_email(bcc_list, subject, body):
-    if not GMAIL_USER or not GMAIL_PASS or not bcc_list: return False
+def send_email(to_email, bcc_list, subject, body):
     try:
-        msg = MIMEText(body)
+        msg = EmailMessage()
+        msg.set_content(body)
         msg['Subject'] = subject
         msg['From'] = GMAIL_USER
-        msg['To'] = GMAIL_USER # Send to self, BCC everyone else for privacy
-        msg['Bcc'] = ", ".join(bcc_list)
+        msg['To'] = to_email
+        if bcc_list:
+            msg['Bcc'] = ", ".join(bcc_list)
 
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(GMAIL_USER, GMAIL_PASS)
-        server.send_message(msg)
-        server.quit()
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(GMAIL_USER, GMAIL_PASSWORD)
+            smtp.send_message(msg)
         return True
     except Exception as e:
-        print(f"-> Email error: {e}")
+        print(f"Failed to send email: {e}")
         return False
 
-# --- MAIN ROUTES ---
+# --- Core Web Routes ---
 @app.route('/')
 def index():
-    display_start, display_date = "8:45 AM", "Apr 04, 2026" 
-    try:
-        settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
-        for r in settings_resp.get('records', []):
-            if r['fields'].get('Setting') == 'StartTime':
-                match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', str(r['fields'].get('Value')), re.IGNORECASE)
-                display_start = match.group(1).upper() if match else "8:45 AM"
-            elif r['fields'].get('Setting') == 'TargetDate': display_date = r['fields'].get('Value')
-    except: pass
+    # 1. Get Settings (Date & Time)
+    settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
+    display_date = "TBD"
+    display_start = "TBD"
+    if 'records' in settings_resp and len(settings_resp['records']) > 0:
+        fields = settings_resp['records'][0]['fields']
+        display_date = fields.get('target_date', 'TBD')
+        display_start = fields.get('start_time', 'TBD')
 
-    roster_list = []
-    try:
-        signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
-        for r in signups_resp.get('records', []):
-            if 'First' in r.get('fields', {}): roster_list.append(r['fields'])
-    except: pass
+    # 2. Get Roster
+    signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
+    roster_list = [r['fields'] for r in signups_resp.get('records', [])]
 
-    # Fetch Draft Messages for Admin
-    drafts = []
-    if session.get('user', {}).get('is_admin'):
-        try:
-            msgs_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/messages?filterByFormula=Status='Draft'", headers=HEADERS).json()
-            drafts = [{"id": r['id'], **r['fields']} for r in msgs_resp.get('records', [])]
-        except: pass
-    
-    # Calculate Friday 8 AM Deadline
+    # 3. Get Weather
+    weather_text = get_weather_forecast(display_date, display_start)
+
+    # 4. Calculate Friday 8 AM Deadline & Waitlist Logic
     is_past_deadline = False
     has_waitlist = False
     try:
@@ -113,124 +94,258 @@ def index():
 
     # If the roster isn't a perfect multiple of 4, someone is on the waitlist
     has_waitlist = len(roster_list) % 4 != 0
-    
-    weather_text = get_weather_forecast(display_date, display_start)
-    return render_template('index.html', weather=weather_text, start_time=display_start, target_date=display_date, roster=roster_list, drafts=drafts)
+
+    # 5. Get Pending Message Drafts (For Admin Panel)
+    drafts = []
+    if 'user' in session and session['user'].get('is_admin'):
+        messages_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/messages", headers=HEADERS).json()
+        for r in messages_resp.get('records', []):
+            if r['fields'].get('Status') == 'Draft':
+                draft_data = r['fields']
+                draft_data['id'] = r['id']
+                drafts.append(draft_data)
+
+    return render_template('index.html', weather=weather_text, start_time=display_start, target_date=display_date, roster=roster_list, drafts=drafts, is_past_deadline=is_past_deadline, has_waitlist=has_waitlist)
 
 @app.route('/validate', methods=['POST'])
 def validate():
-    code, password = request.form.get('code', '').strip(), request.form.get('password', '')
-    try:
-        resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list?filterByFormula=Code='{code}'", headers=HEADERS).json()
-        if resp.get('records'):
-            user_data = resp['records'][0]['fields']
-            if str(code) == "9999":
-                if password == ADMIN_PASSWORD:
-                    session['user'] = {'first': 'Admin', 'last': 'User', 'is_admin': True}
-                else: flash("Incorrect Admin Password", "error")
-            else: session['user'] = {'first': user_data.get('First'), 'last': user_data.get('Last'), 'is_admin': False}
-        else: flash("Invalid Player Code", "error")
-    except: flash("Database error.", "error")
-    return redirect(url_for('index'))
+    code = request.form.get('code')
+    password = request.form.get('password')
 
-@app.route('/signup', methods=['POST'])
-def signup():
-    if 'user' not in session: return redirect(url_for('index'))
-    try:
-        date_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings?filterByFormula=Setting='TargetDate'", headers=HEADERS).json()
-        target_date = date_resp['records'][0]['fields']['Value'] if date_resp.get('records') else "Upcoming Saturday"
-        
-        payload = {"records": [{"fields": {"Date": target_date, "First": session['user']['first'], "Last": session['user']['last']}}]}
-        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS, json=payload)
-    except: pass
-    return redirect(url_for('index'))
-
-@app.route('/approve_message', methods=['POST'])
-def approve_message():
-    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    msg_id = request.form.get('msg_id')
-    payload = {"fields": {"Subject": request.form.get('subject'), "Body": request.form.get('body'), "Status": "Approved"}}
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/messages/{msg_id}", headers=HEADERS, json=payload)
-    flash("Message approved and queued!", "success")
+    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
+    
+    for record in master_resp.get('records', []):
+        fields = record.get('fields', {})
+        if str(fields.get('Code')) == str(code):
+            is_admin = False
+            if password:
+                if password == ADMIN_PW:
+                    is_admin = True
+                else:
+                    flash("Incorrect Admin Password.", "error")
+                    return redirect(url_for('index'))
+            
+            session['user'] = {
+                'first': fields.get('First'),
+                'last': fields.get('Last'),
+                'is_admin': is_admin
+            }
+            return redirect(url_for('index'))
+            
+    flash("Code not found. Please try again.", "error")
     return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
-    session.clear()
+    session.pop('user', None)
     return redirect(url_for('index'))
 
-# --- AUTOMATION (CRON) ROUTING ---
+# --- Player Actions ---
+@app.route('/signup', methods=['POST'])
+def signup():
+    if 'user' not in session: return redirect(url_for('index'))
+    
+    settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
+    target_date = "TBD"
+    if 'records' in settings_resp and len(settings_resp['records']) > 0:
+        target_date = settings_resp['records'][0]['fields'].get('target_date', 'TBD')
+
+    payload = {
+        "records": [{
+            "fields": {
+                "Date": target_date,
+                "First": session['user']['first'],
+                "Last": session['user']['last']
+            }
+        }]
+    }
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS, json=payload)
+    flash("You are on the roster!", "success")
+    return redirect(url_for('index'))
+
+@app.route('/cancel', methods=['POST'])
+def cancel():
+    if 'user' not in session: return redirect(url_for('index'))
+    try:
+        signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
+        for r in signups_resp.get('records', []):
+            if r['fields'].get('First') == session['user']['first'] and r['fields'].get('Last') == session['user']['last']:
+                requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/signups/{r['id']}", headers=HEADERS)
+                break 
+    except: pass
+    return redirect(url_for('index'))
+
+@app.route('/provide_sub', methods=['POST'])
+def provide_sub():
+    if 'user' not in session: return redirect(url_for('index'))
+    sub_name = request.form.get('sub_name')
+    if not sub_name: return redirect(url_for('index'))
+    
+    try:
+        signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
+        for r in signups_resp.get('records', []):
+            if r['fields'].get('First') == session['user']['first'] and r['fields'].get('Last') == session['user']['last']:
+                payload = {"fields": {"First": f"{sub_name} (Sub)", "Last": f"for {session['user']['first']}"}}
+                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/signups/{r['id']}", headers=HEADERS, json=payload)
+                break
+    except: pass
+    return redirect(url_for('index'))
+
+# --- Admin Controls ---
+@app.route('/update_settings', methods=['POST'])
+def update_settings():
+    if 'user' not in session or not session['user'].get('is_admin'):
+        return redirect(url_for('index'))
+
+    new_date = request.form.get('date_string')
+    new_time = request.form.get('time_string')
+
+    settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
+    if 'records' in settings_resp and len(settings_resp['records']) > 0:
+        record_id = settings_resp['records'][0]['id']
+        payload = {
+            "fields": {
+                "target_date": new_date,
+                "start_time": new_time
+            }
+        }
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/settings/{record_id}", headers=HEADERS, json=payload)
+        flash("Schedule updated successfully!", "success")
+        
+    return redirect(url_for('index'))
+
+@app.route('/approve_message', methods=['POST'])
+def approve_message():
+    if 'user' not in session or not session['user'].get('is_admin'):
+        return redirect(url_for('index'))
+
+    msg_id = request.form.get('msg_id')
+    new_subject = request.form.get('subject')
+    new_body = request.form.get('body')
+
+    payload = {
+        "fields": {
+            "Status": "Approved",
+            "Subject": new_subject,
+            "Body": new_body
+        }
+    }
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/messages/{msg_id}", headers=HEADERS, json=payload)
+    flash("Message approved and queued for sending!", "success")
+    
+    return redirect(url_for('index'))
+
+
+# --- CRON JOB AUTOMATIONS ---
+
 @app.route('/cron/sunday')
 def cron_sunday():
-    # 1. Archive current signups & delete them
+    # 1. Archive Roster & Clear Signups
     signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
     records = signups_resp.get('records', [])
+    
     if records:
-        archive_payload = {"records": [{"fields": {"Date": r['fields'].get('Date'), "First": r['fields'].get('First'), "Last": r['fields'].get('Last')}} for r in records]}
-        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/history", headers=HEADERS, json=archive_payload)
-        for r in records: requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/signups/{r['id']}", headers=HEADERS)
+        archive_payload = {"records": [{"fields": {"Date": r['fields'].get('Date', 'Unknown'), "First": r['fields'].get('First', ''), "Last": r['fields'].get('Last', '')}} for r in records]}
+        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/roster_history", headers=HEADERS, json=archive_payload)
+        
+        for r in records:
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/signups/{r['id']}", headers=HEADERS)
 
-    # 2. Advance TargetDate to next Saturday
-    settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings?filterByFormula=Setting='TargetDate'", headers=HEADERS).json()
-    if settings_resp.get('records'):
-        rec_id = settings_resp['records'][0]['id']
-        next_sat = (datetime.now() + timedelta((5 - datetime.now().weekday() + 7) % 7 or 7)).strftime('%b %d, %Y')
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/settings/{rec_id}", headers=HEADERS, json={"fields": {"Value": next_sat}})
+    # 2. Advance the Date by 7 days
+    settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
+    if 'records' in settings_resp and len(settings_resp['records']) > 0:
+        record_id = settings_resp['records'][0]['id']
+        current_date_str = settings_resp['records'][0]['fields'].get('target_date')
+        try:
+            current_dt = datetime.strptime(current_date_str, "%b %d, %Y")
+            new_dt = current_dt + timedelta(days=7)
+            new_date_str = new_dt.strftime("%b %d, %Y")
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/settings/{record_id}", headers=HEADERS, json={"fields": {"target_date": new_date_str}})
+        except: pass
 
-    # 3. Draft Monday Promo
-    draft_payload = {"records": [{"fields": {"Type": "Monday Promo", "Status": "Draft", "Subject": "Tennis This Saturday?", "Body": f"Signups are open for {next_sat}!\n\nLog in to RSVP."}}]}
+    # 3. Create Monday Invite Draft
+    draft_payload = {
+        "records": [{
+            "fields": {
+                "Type": "Monday Invite",
+                "Status": "Draft",
+                "Subject": f"Tennis Signups Open for {new_date_str}",
+                "Body": "Happy Sunday!\n\nSignups are now open for this coming Saturday. Click the link below to add your name to the roster:\n\nhttps://YOUR-APP-NAME.onrender.com\n\nCheers!"
+            }
+        }]
+    }
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/messages", headers=HEADERS, json=draft_payload)
+
     return "Sunday Routine Complete", 200
 
 @app.route('/cron/thursday')
 def cron_thursday():
-    # Fetch current target date/time for weather
     settings_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/settings", headers=HEADERS).json()
-    date_val, time_val = "Upcoming", "8:45 AM"
-    for r in settings_resp.get('records', []):
-        if r['fields'].get('Setting') == 'TargetDate': date_val = r['fields'].get('Value')
-        if r['fields'].get('Setting') == 'StartTime': time_val = r['fields'].get('Value')
-    
-    weather = get_weather_forecast(date_val, time_val)
-    body = f"Hello Tennis Gang,\n\nHere is the update for {date_val} at {time_val}.\n\nForecast: {weather}\n\nSee you on the courts!"
-    
-    draft_payload = {"records": [{"fields": {"Type": "Friday Confirmation", "Status": "Draft", "Subject": "Saturday Tennis Confirmation", "Body": body}}]}
+    target_date = "TBD"
+    start_time = "TBD"
+    if 'records' in settings_resp and len(settings_resp['records']) > 0:
+        target_date = settings_resp['records'][0]['fields'].get('target_date', 'TBD')
+        start_time = settings_resp['records'][0]['fields'].get('start_time', 'TBD')
+
+    weather = get_weather_forecast(target_date, start_time)
+
+    draft_payload = {
+        "records": [{
+            "fields": {
+                "Type": "Friday Confirmation",
+                "Status": "Draft",
+                "Subject": f"Tennis Tomorrow ({target_date}) - Details & Weather",
+                "Body": f"Hello everyone,\n\nTennis is on for tomorrow at {start_time}.\n\nExpected Weather: {weather}\n\nPlease check the live roster to confirm your spot. If you are past the deadline to drop out, please ensure you use the app to provide a sub if you can no longer make it.\n\nhttps://YOUR-APP-NAME.onrender.com\n\nSee you on the courts!"
+            }
+        }]
+    }
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/messages", headers=HEADERS, json=draft_payload)
+    
     return "Thursday Routine Complete", 200
 
 @app.route('/cron/send_approved')
 def cron_send_approved():
-    # Sends emails marked "Approved" to the Master List
-    msgs_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/messages?filterByFormula=Status='Approved'", headers=HEADERS).json()
-    if not msgs_resp.get('records'): return "No approved messages", 200
+    messages_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/messages", headers=HEADERS).json()
+    approved_messages = [m for m in messages_resp.get('records', []) if m['fields'].get('Status') == 'Approved']
     
-    # Get all emails
-    emails = []
-    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
-    for r in master_resp.get('records', []):
-        if 'Email' in r['fields']: emails.append(r['fields']['Email'])
+    if not approved_messages:
+        return "No approved messages to send.", 200
 
-    for msg in msgs_resp['records']:
-        send_email(emails, msg['fields'].get('Subject', ''), msg['fields'].get('Body', ''))
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/messages/{msg['id']}", headers=HEADERS, json={"fields": {"Status": "Sent"}})
-    
-    return "Sent Approved Messages", 200
+    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
+    bcc_emails = [r['fields'].get('Email') for r in master_resp.get('records', []) if r['fields'].get('Email')]
+
+    for msg in approved_messages:
+        subject = msg['fields'].get('Subject', 'Tennis Update')
+        body = msg['fields'].get('Body', '')
+        
+        success = send_email(to_email=GMAIL_USER, bcc_list=bcc_emails, subject=subject, body=body)
+        
+        if success:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/messages/{msg['id']}", headers=HEADERS, json={"fields": {"Status": "Sent"}})
+
+    return "Sent approved messages.", 200
 
 @app.route('/cron/saturday_reminder')
-def cron_saturday():
-    # Gets emails ONLY for scheduled players
-    signups = [r['fields'].get('First') for r in requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json().get('records', [])]
-    if not signups: return "No players", 200
-
-    emails = []
-    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
-    for r in master_resp.get('records', []):
-        if r['fields'].get('First') in signups and 'Email' in r['fields']:
-            emails.append(r['fields']['Email'])
+def cron_saturday_reminder():
+    signups_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/signups", headers=HEADERS).json()
+    active_players = [r['fields'] for r in signups_resp.get('records', [])]
     
-    send_email(emails, "Tennis Reminder", "Friendly reminder: Tennis starts in 90 minutes! Drive safe.")
-    return "Saturday Reminder Sent", 200
+    if not active_players:
+        return "No players, no reminder sent.", 200
+
+    master_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/master_list", headers=HEADERS).json()
+    master_dict = {f"{r['fields'].get('First')} {r['fields'].get('Last')}": r['fields'].get('Email') for r in master_resp.get('records', [])}
+
+    bcc_emails = []
+    for player in active_players:
+        full_name = f"{player.get('First')} {player.get('Last')}"
+        if full_name in master_dict and master_dict[full_name]:
+            bcc_emails.append(master_dict[full_name])
+
+    if bcc_emails:
+        send_email(to_email=GMAIL_USER, bcc_list=bcc_emails, subject="Tennis Reminder - See you soon!", body="Just a friendly reminder that you are on the roster for tennis this morning! See you on the courts shortly.")
+
+    return "Saturday reminder sent.", 200
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(debug=True)
