@@ -16,8 +16,10 @@
         input, button, textarea { padding: 10px; font-size: 1em; border-radius: 5px; border: 1px solid #ccc; }
         button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: 0.3s; }
         button:hover { background-color: #2980b9; }
-        .roster-list { list-style-type: none; padding: 0; }
+        .roster-list { list-style-type: none; padding: 0; margin: 0; }
         .roster-list li { background: #ecf0f1; margin: 5px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between;}
+        .court-box { border: 2px solid #bdc3c7; border-radius: 8px; margin-bottom: 15px; padding: 15px; background: #fafafa; }
+        .court-header { margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; color: #2980b9; font-size: 1.1em; font-weight: bold; }
         .admin-panel { background: #e8f4f8; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #bce8f1; }
     </style>
 </head>
@@ -46,19 +48,48 @@
         <form action="/validate" method="POST">
             <label>Enter 4-Digit Player Code:</label>
             <input type="text" name="code" required pattern="\d{4}" title="Please enter exactly 4 digits.">
-            
             <label>Admin Password (leave blank if player):</label>
             <input type="password" name="password">
-            
             <button type="submit">Log In</button>
         </form>
     {% else %}
         <div style="text-align: center; margin-bottom: 20px;">
             <p>Welcome, <strong>{{ session.user.first }}</strong>!</p>
             
-            <form action="/signup" method="POST" style="display: inline-block; width: 48%;">
-                <button type="submit" style="background-color: #27ae60;">Sign Up to Play</button>
-            </form>
+            {% set current_user_playing = roster | selectattr("First", "equalto", session.user.first) | selectattr("Last", "equalto", session.user.last) | list %}
+            
+            {% if current_user_playing %}
+                {% if is_past_deadline %}
+                    {% if has_waitlist %}
+                        <form action="/cancel" method="POST" style="display: inline-block; width: 48%;">
+                            <button type="submit" style="background-color: #8e44ad; font-size: 0.9em; padding: 10px 5px;">Drop (Waitlist Sub)</button>
+                        </form>
+                    {% else %}
+                        <form action="/provide_sub" method="POST" style="display: inline-block; width: 48%;" onsubmit="return promptSub(this);">
+                            <input type="hidden" name="sub_name" id="sub_name_input">
+                            <button type="submit" style="background-color: #d35400; font-size: 0.9em; padding: 10px 5px;">Provide Sub Info</button>
+                        </form>
+                        <script>
+                            function promptSub(form) {
+                                var sub = prompt("It is past Friday 8 AM. Please enter the name of the person subbing for you:");
+                                if (sub) {
+                                    document.getElementById('sub_name_input').value = sub;
+                                    return true;
+                                }
+                                return false;
+                            }
+                        </script>
+                    {% endif %}
+                {% else %}
+                    <form action="/cancel" method="POST" style="display: inline-block; width: 48%;">
+                        <button type="submit" style="background-color: #f39c12;">Drop Out</button>
+                    </form>
+                {% endif %}
+            {% else %}
+                <form action="/signup" method="POST" style="display: inline-block; width: 48%;">
+                    <button type="submit" style="background-color: #27ae60;">Sign Up to Play</button>
+                </form>
+            {% endif %}
             
             <a href="/logout" style="display: inline-block; width: 48%; text-align: center; text-decoration: none;">
                 <button type="button" style="background-color: #e74c3c; width: 100%;">Log Out</button>
@@ -69,11 +100,22 @@
     <hr>
     <h4>Who's Playing?</h4>
     {% if roster %}
-        <ul class="roster-list">
-            {% for player in roster %}
-                <li>{{ player.First }} {{ player.Last }}</li>
-            {% endfor %}
-        </ul>
+        {% for court in roster | batch(4) %}
+            <div class="court-box">
+                <div class="court-header">
+                    {% if court|length == 4 %}
+                        Court {{ loop.index }}
+                    {% else %}
+                        Waitlist / Incomplete Court
+                    {% endif %}
+                </div>
+                <ul class="roster-list">
+                    {% for player in court %}
+                        <li>{{ player.First }} {{ player.Last }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endfor %}
         <p style="text-align: center; color: #7f8c8d; font-size: 0.9em;">Total Players: {{ roster|length }}</p>
     {% else %}
         <p style="text-align: center; color: #7f8c8d;">No one has signed up yet for this week. Be the first!</p>
@@ -90,16 +132,11 @@
                 <form action="/approve_message" method="POST" style="background: white; padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
                     <input type="hidden" name="msg_id" value="{{ msg.id }}">
                     <p style="margin: 0 0 10px 0;"><strong>Type:</strong> {{ msg.Type }}</p>
-                    
                     <label>Subject:</label>
                     <input type="text" name="subject" value="{{ msg.Subject }}" required>
-                    
                     <label>Message Body:</label>
                     <textarea name="body" rows="6" required style="font-family: inherit;">{{ msg.Body }}</textarea>
-                    
-                    <button type="submit" style="background: #28a745;">
-                        Approve & Queue for Sending
-                    </button>
+                    <button type="submit" style="background: #28a745;">Approve & Queue for Sending</button>
                 </form>
                 {% endfor %}
             </div>
@@ -111,10 +148,8 @@
             <h5 style="margin-top: 0; text-align: center;">Update Schedule</h5>
             <label>Date (e.g., Apr 04, 2026):</label>
             <input type="text" name="date_string" value="{{ target_date }}" required>
-            
             <label>Start Time:</label>
             <input type="text" name="time_string" value="{{ start_time }}" required>
-            
             <button type="submit">Update Schedule</button>
         </form>
     </div>
