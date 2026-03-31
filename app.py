@@ -100,7 +100,20 @@ def index():
             msgs_resp = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/messages?filterByFormula=Status='Draft'", headers=HEADERS).json()
             drafts = [{"id": r['id'], **r['fields']} for r in msgs_resp.get('records', [])]
         except: pass
+    
+    # Calculate Friday 8 AM Deadline
+    is_past_deadline = False
+    has_waitlist = False
+    try:
+        target_dt = datetime.strptime(display_date, "%b %d, %Y")
+        # Deadline is 1 day before the target date (Friday) at 8:00 AM
+        deadline_dt = target_dt - timedelta(days=1) + timedelta(hours=8)
+        is_past_deadline = datetime.now() >= deadline_dt
+    except: pass
 
+    # If the roster isn't a perfect multiple of 4, someone is on the waitlist
+    has_waitlist = len(roster_list) % 4 != 0
+    
     weather_text = get_weather_forecast(display_date, display_start)
     return render_template('index.html', weather=weather_text, start_time=display_start, target_date=display_date, roster=roster_list, drafts=drafts)
 
