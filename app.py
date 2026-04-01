@@ -1,4 +1,4 @@
-import os, requests, uuid
+import os, requests
 from flask import Flask, render_template, request, session, redirect, url_for, flash
 from datetime import datetime, timedelta
 
@@ -13,17 +13,17 @@ W_KEY = os.environ.get("WEATHER_API_KEY")
 
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
-def get_airtable_data(table_name, sort=False):
-    """Fetches records from Airtable. table_name must match Airtable tab name exactly."""
+def get_airtable_data(table_name):
+    """Fetches records. We removed the explicit 'createdTime' sort to fix the 422 error."""
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
-    if sort:
-        url += "?sort%5B0%5D%5Bfield%5D=createdTime&sort%5B0%5D%5Bdirection%5D=asc"
+    # This keeps the order exactly as seen in the Airtable Grid view
+    url += "?view=Grid%20view"
     try:
         r = requests.get(url, headers=HEADERS)
         if r.status_code == 200:
             return r.json().get('records', [])
         else:
-            print(f"Airtable Error {r.status_code}: {r.text}")
+            print(f"Airtable Error {r.status_code} for {table_name}: {r.text}")
             return []
     except Exception as e:
         print(f"Connection Error: {e}")
@@ -31,7 +31,7 @@ def get_airtable_data(table_name, sort=False):
 
 @app.route('/')
 def index():
-    # 1. Fetch Settings (Exact Table Name: 'Settings')
+    # 1. Settings
     settings = get_airtable_data("Settings")
     d_date, d_start = "TBD", "TBD"
     if settings:
@@ -39,8 +39,8 @@ def index():
         d_date = f.get('Target Date', 'TBD')
         d_start = f.get('Start Time', 'TBD')
 
-    # 2. Fetch Roster (Exact Table Name: 'Signups')
-    signup_recs = get_airtable_data("Signups", sort=True)
+    # 2. Roster
+    signup_recs = get_airtable_data("Signups")
     roster = []
     user_on_roster = False
     waitlist_pos = 0
@@ -54,20 +54,20 @@ def index():
             user_on_roster = True
             if i >= 24: waitlist_pos = i - 23
 
-    # 3. Weather (Saturday Start + 3 Hours)
+    # 3. Weather (Saturday morning)
     weather_info = "Weather Unavailable"
     try:
-        w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=Lafayette,CO&days=7").json()
+        w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
         sat_forecast = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
         if sat_forecast:
-            # Assumes 8 AM start - we fetch index 8 and 11
-            t_start = int(sat_forecast['hour'][8]['temp_f'])
-            t_end = int(sat_forecast['hour'][11]['temp_f'])
+            # 8 AM and 11 AM
+            t8 = int(sat_forecast['hour'][8]['temp_f'])
+            t11 = int(sat_forecast['hour'][11]['temp_f'])
             cond = sat_forecast['hour'][8]['condition']['text']
-            weather_info = f"Sat: {cond}, {t_start}°F → {t_end}°F"
+            weather_info = f"Sat: {cond}, {t8}°F → {t11}°F"
     except: pass
 
-    # 4. Injuries (Exact Table Name: 'Master List')
+    # 4. Injuries
     master = get_airtable_data("Master List")
     injured = [r['fields'] for r in master if r['fields'].get('Injury Status') == 'Injured']
 
@@ -86,7 +86,7 @@ def validate():
             is_admin = (code == '9999' and password == ADMIN_PW)
             session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
             return redirect(url_for('index'))
-    flash(f"Code {code} not found in Master List.", "error")
+    flash(f"Code {code} not found.", "error")
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
