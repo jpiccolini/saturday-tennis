@@ -176,13 +176,31 @@ def admin_action():
 
 @app.route('/validate', methods=['POST'])
 def validate():
-    code = request.form.get('code', '').strip()
+    """Handles login via Player Code with extra formatting protection."""
+    # .strip() removes any accidental spaces the user typed
+    code = str(request.form.get('code', '')).strip()
+    password = request.form.get('password')
+    
     master = get_airtable_data("Master List")
+    
     for r in master:
-        if str(r['fields'].get('Code')) == code:
-            session['user'] = {'first': r['fields'].get('First'), 'last': r['fields'].get('Last'), 'code': code, 'is_admin': (code == '9999' and request.form.get('password') == ADMIN_PW)}
+        f = r.get('fields', {})
+        # Convert Airtable value to string and strip spaces to ensure a match
+        airtable_code = str(f.get('Code', '')).strip()
+        
+        if airtable_code == code:
+            # Check for admin login
+            is_admin = (code == '9999' and password == ADMIN_PW)
+            
+            session['user'] = {
+                'first': f.get('First'), 
+                'last': f.get('Last'), 
+                'code': code, 
+                'is_admin': is_admin
+            }
             return redirect(url_for('index'))
-    flash("Code not found.", "error")
+            
+    flash(f"Code {code} not found. Please check your email or contact Jim.", "error")
     return redirect(url_for('index'))
 
 @app.route('/logout')
