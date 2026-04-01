@@ -18,7 +18,6 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL")
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 # --- HELPERS ---
-
 def send_email(to_email, subject, html_content):
     if not SG_KEY or not FROM_EMAIL: return
     message = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html_content)
@@ -28,29 +27,22 @@ def send_email(to_email, subject, html_content):
     except Exception as e: print(f"Email Error: {e}")
 
 def get_airtable_data(table_name, filter_formula=None, sort_field=None):
-    """Fetch records with strict sorting to prevent jumping the line."""
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
     params = {}
     if filter_formula: params['filterByFormula'] = filter_formula
     if sort_field:
         params['sort[0][field]'] = sort_field
-        params['sort[0][direction]'] = "asc" # Oldest (first to sign up) at top
+        params['sort[0][direction]'] = "asc"
     
     try:
         r = requests.get(url, headers=HEADERS, params=params)
         return r.json().get('records', []) if r.status_code == 200 else []
     except: return []
 
-def get_next_code():
-    master = get_airtable_data("Master List")
-    codes = [int(str(r['fields'].get('Code')).strip()) for r in master if str(r['fields'].get('Code', '')).strip().isdigit() and int(str(r['fields'].get('Code')).strip()) < 9999]
-    return str(max(codes) + 1) if codes else "1000"
-
 # --- ROUTES ---
 
 @app.route('/')
 def index():
-    # 1. Fetch Settings
     settings = get_airtable_data("Settings")
     d_date, d_start, d_end = "TBD", "TBD", ""
     if settings:
@@ -61,7 +53,6 @@ def index():
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
         except: pass
 
-    # 2. Fetch Signups (SORTED BY CREATED TIME)
     signup_recs = get_airtable_data("Signups", sort_field="Created Time")
     roster = []
     user_on_roster, waitlist_pos = False, 0
@@ -74,7 +65,6 @@ def index():
             user_on_roster = True
             if i >= 24: waitlist_pos = i - 23
 
-    # 3. Weather
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
@@ -84,32 +74,14 @@ def index():
             weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
-    # 4. Admin Data (Fetch for dashboard)
-    applicants, master_list = [], []
+    applicants, full_master = [], []
     if curr_user and curr_user.get('is_admin'):
         applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
-        master_list = get_airtable_data("Master List")
+        full_master = get_airtable_data("Master List", sort_field="First")
 
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
-                           applicants=applicants, master_list=master_list, user_on_roster=user_on_roster, 
+                           applicants=applicants, master_list=full_master, user_on_roster=user_on_roster, 
                            waitlist_pos=waitlist_pos, weather=weather_info)
-
-@app.route('/validate', methods=['POST'])
-def validate():
-    code = str(request.form.get('code', '')).strip()
-    password = request.form.get('password')
-    formula = f"{{Code}}='{code}'"
-    records = get_airtable_data("Master List", filter_formula=formula)
-
-    if records:
-        f = records[0]['fields']
-        # FIX: Admin is true if code is 9999 OR if the code matches yours and password is correct
-        is_admin = (password == ADMIN_PW) 
-        session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
-        return redirect(url_for('index'))
-            
-    flash(f"Code {code} not found.", "error")
-    return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
@@ -125,59 +97,22 @@ def admin_action():
         for r in get_airtable_data("Signups"): 
             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
     
-    elif action == 'injury_update':
-        # Logic to add note to Master List or Archive (Customizable)
-        flash("Injury/Notes updated in Airtable.", "info")
+    elif action == 'player_update':
+        player_id = request.form.get('player_id')
+        note = request.form.get('note')
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{player_id}", headers=HEADERS, 
+                       json={"fields": {"Notes": note}})
+        flash("Player notes updated.", "success")
 
     return redirect(url_for('index'))
 
-@app.route('/signup', methods=['POST'])
-def signup():
-    if not session.get('user'): return redirect(url_for('index'))
-    existing = get_airtable_data("Signups")
-    formula = f"{{Code}}='{session['user']['code']}'"
-    master_match = get_airtable_data("Master List", filter_formula=formula)
-    email = master_match[0]['fields'].get('Email', '') if master_match else ""
-
-    data = {"fields": {"First": session['user']['first'], "Last": session['user']['last'], 
-                       "Player Code": str(session['user']['code']), "Email": email,
-                       "Status": "Confirmed" if len(existing) < 24 else "Waitlist"}}
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=data)
-    return redirect(url_for('index'))
-
-@app.route('/cancel', methods=['POST'])
-def cancel():
-    if not session.get('user'): return redirect(url_for('index'))
-    recs = get_airtable_data("Signups", sort_field="Created Time")
-    cancel_idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
-    
-    if cancel_idx is not None:
-        if cancel_idx < 24 and len(recs) > 24:
-            promo = recs[24]
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{promo['id']}", headers=HEADERS, json={"fields": {"Status": "Confirmed"}})
-            send_email(promo['fields'].get('Email'), "🎾 You're OFF the Waitlist!", f"Hi {promo['fields']['First']}, you are now Confirmed!")
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[cancel_idx]['id']}", headers=HEADERS)
-    return redirect(url_for('index'))
-
-@app.route('/logout')
-def logout():
-    session.clear(); return redirect(url_for('index'))
-
-@app.route('/apply', methods=['POST'])
-def apply():
-    data = {"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Status": "Pending"}}
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=data)
-    return redirect(url_for('index'))
-
-@app.route('/approve/<app_id>', methods=['POST'])
-def approve(app_id):
+@app.route('/no_show/<player_code>', methods=['POST'])
+def no_show(player_code):
+    """Logs a strike in the Archive table."""
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    app_rec = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
-    f = app_rec['fields']
-    new_code = get_next_code()
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json={"fields": {"First": f['First'], "Last": f['Last'], "Code": new_code, "Email": f.get('Email')}})
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved", "Assigned Code": new_code}})
-    send_email(f.get('Email'), "Welcome to the Tennis Gang!", f"Hi {f['First']}, your code is {new_code}")
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, 
+                  json={"fields": {"Player Code": str(player_code), "Attendance": "No Show", "Date": datetime.now().strftime("%Y-%m-%d")}})
+    flash(f"Strike logged for code {player_code}.", "warning")
     return redirect(url_for('index'))
 
-if __name__ == '__main__': app.run(debug=True)
+# ... (Keep /validate, /signup, /cancel, /apply, /approve from previous version) ...
