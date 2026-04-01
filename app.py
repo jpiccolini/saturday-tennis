@@ -22,7 +22,7 @@ def get_table_data(table_name, sort=False):
 
 @app.route('/')
 def index():
-    # 1. Settings & Deadline
+    # 1. Settings
     settings_recs = get_table_data("Settings")
     display_date, display_start = "TBD", "TBD"
     is_past_deadline = False
@@ -35,29 +35,31 @@ def index():
             is_past_deadline = datetime.now() >= deadline_dt.replace(hour=8, minute=0)
         except: pass
 
-    # 2. Roster & User Check
+    # 2. Roster & Waitlist Position
     signup_recs = get_table_data("Signups", sort=True)
     roster = []
     user_on_roster = False
     waitlist_pos = 0
     
+    # Get current user from session safely
+    current_user = session.get('user')
+    
     for i, r in enumerate(signup_recs):
         fields = r['fields']
         fields['id'] = r['id']
         roster.append(fields)
-        # FORCE STRING COMPARISON so 1001 == "1001"
-        if session.get('user') and str(fields.get('Player Code')) == str(session['user']['code']):
+        if current_user and str(fields.get('Player Code')) == str(current_user.get('code')):
             user_on_roster = True
             if i >= 24:
-                waitlist_pos = i - 23 # Position 1, 2, 3...
+                waitlist_pos = i - 23
 
     # 3. Injuries & Strikes
     master_recs = get_table_data("Master List")
     injured = [r['fields'] for r in master_recs if r['fields'].get('Injury Status') == 'Injured']
     strikes = 0
-    if session.get('user'):
+    if current_user:
         archive = get_table_data("Archive")
-        strikes = sum(1 for r in archive if str(r['fields'].get('Player Code')) == str(session['user']['code']) and r['fields'].get('Attendance') == 'No Show')
+        strikes = sum(1 for r in archive if str(r['fields'].get('Player Code')) == str(current_user.get('code')) and r['fields'].get('Attendance') == 'No Show')
 
     return render_template('index.html', target_date=display_date, start_time=display_start, 
                            roster=roster, injured_players=injured, strikes=strikes,
@@ -98,4 +100,4 @@ def cancel():
 
 @app.route('/logout')
 def logout():
-    session.pop('user', None); return redirect(url_for('index'))
+    session.clear(); return redirect(url_for('index'))
