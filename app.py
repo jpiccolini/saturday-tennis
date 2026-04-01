@@ -37,14 +37,11 @@ def index():
     curr_user = session.get('user')
     
     for i, r in enumerate(signup_recs):
-        fields = r['fields']
-        fields['id'] = r['id']
+        fields = r['fields']; fields['id'] = r['id']
         roster.append(fields)
-        # Match user by Player Code (String to String)
         if curr_user and str(fields.get('Player Code')) == str(curr_user.get('code')):
             user_on_roster = True
-            if i >= 24:
-                waitlist_pos = i - 23
+            if i >= 24: waitlist_pos = i - 23
 
     # 3. Weather
     weather_info = "Weather Unavailable"
@@ -56,13 +53,13 @@ def index():
             weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
-    # 4. Master List Data
+    # 4. Master List (for Admin Dropdown)
     master = get_airtable_data("Master List")
     injured = [r['fields'] for r in master if r['fields'].get('Injury Status') == 'Injured']
-    all_players = sorted([r['fields'] for r in master], key=lambda x: x.get('First', ''))
+    players_list = sorted([r['fields'] for r in master], key=lambda x: x.get('First', ''))
 
     return render_template('index.html', target_date=d_date, start_time=d_start, 
-                           roster=roster, injured_players=injured, players=all_players,
+                           roster=roster, injured_players=injured, players=players_list,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
 
 @app.route('/validate', methods=['POST'])
@@ -85,14 +82,10 @@ def signup():
     existing = get_airtable_data("Signups")
     if any(str(r['fields'].get('Player Code')) == str(session['user']['code']) for r in existing):
         return redirect(url_for('index'))
-    
-    data = {"fields": {
-        "First": session['user']['first'], 
-        "Last": session['user']['last'], 
-        "Player Code": str(session['user']['code']), 
-        "Status": "Confirmed" if len(existing) < 24 else "Waitlist",
-        "Date": datetime.now().strftime("%Y-%m-%d")
-    }}
+    data = {"fields": {"First": session['user']['first'], "Last": session['user']['last'], 
+                       "Player Code": str(session['user']['code']), 
+                       "Status": "Confirmed" if len(existing) < 24 else "Waitlist",
+                       "Date": datetime.now().strftime("%Y-%m-%d")}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=data)
     return redirect(url_for('index'))
 
@@ -101,34 +94,27 @@ def cancel():
     if not session.get('user'): return redirect(url_for('index'))
     recs = get_airtable_data("Signups")
     rid = next((r['id'] for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
-    if rid:
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{rid}", headers=HEADERS)
+    if rid: requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{rid}", headers=HEADERS)
     return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     action = request.form.get('action')
-    
     if action == 'labels':
         recs = get_airtable_data("Settings")
         if recs:
             payload = {"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}}
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{recs[0]['id']}", headers=HEADERS, json=payload)
-    
     elif action == 'strike':
         code = request.form.get('player_code')
         master = get_airtable_data("Master List")
         p = next((r['fields'] for r in master if str(r['fields'].get('Code')) == str(code)), None)
         if p:
-            payload = {"fields": {
-                "First": p.get('First'), "Last": p.get('Last'), 
-                "Player Code": str(code), "Attendance": "No Show", 
-                "Date": datetime.now().strftime("%Y-%m-%d")
-            }}
+            payload = {"fields": {"First": p.get('First'), "Last": p.get('Last'), "Player Code": str(code), 
+                               "Attendance": "No Show", "Date": datetime.now().strftime("%Y-%m-%d")}}
             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=payload)
             flash(f"Strike recorded for {p.get('First')}.", "success")
-
     return redirect(url_for('index'))
 
 @app.route('/logout')
