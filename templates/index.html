@@ -3,180 +3,131 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Saturday Tennis Gang @ Dawson School</title>
+    <title>Saturday Tennis Gang</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .container { max-width: 850px; margin-top: 30px; padding-bottom: 50px; }
-        .header-card { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; margin-bottom: 25px; }
-        .weather-badge { background: #e8f4fd; color: #2980b9; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9em; }
-        
-        .court-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }
-        .court-box { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #27ae60; }
-        .court-header { font-weight: bold; color: #27ae60; border-bottom: 1px solid #eee; margin-bottom: 10px; padding-bottom: 5px; display: flex; justify-content: space-between; }
-        
-        .waitlist-box { border-left-color: #f39c12; background: #fffdf9; margin-top: 20px; }
-        .waitlist-header { color: #d35400; }
-        
-        .injury-box { border-left-color: #e74c3c; background: #fff5f5; margin-top: 20px; }
-        .injury-header { color: #c0392b; }
-
+        body { background: #f8f9fa; font-family: sans-serif; }
+        .container { max-width: 900px; margin-top: 30px; padding-bottom: 60px; }
+        .card { border-radius: 15px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
+        .court-box { background: white; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 20px; min-height: 160px; }
         .roster-list { list-style: none; padding: 0; margin: 0; }
-        .roster-list li { padding: 6px 0; border-bottom: 1px solid #fafafa; display: flex; justify-content: space-between; font-size: 0.95em; }
-        
-        .login-box { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; }
-        .admin-panel { background: #2c3e50; color: white; border-radius: 12px; padding: 20px; margin-top: 30px; }
-        
-        #admin-password-group { display: none; margin-top: 15px; text-align: left; }
+        .roster-list li { padding: 8px 0; border-bottom: 1px solid #f1f1f1; display: flex; justify-content: space-between; font-size: 0.9rem; }
+        .admin-section { background: #212529; color: #fff; border-radius: 12px; padding: 25px; margin-top: 40px; }
+        .admin-section h5 { color: #ffc107; margin-bottom: 15px; }
+        .instruction-text { font-size: 0.8rem; color: #adb5bd; margin-bottom: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header-card">
-            <h1>🎾 Saturday Tennis Gang @ Dawson School</h1>
-            <p class="text-muted" style="font-size: 1.2em;">{{ target_date }} — {{ start_time }}</p>
-            <span class="weather-badge">Forecast: {{ weather }}</span>
-            
-            {% with messages = get_flashed_messages(with_categories=true) %}
-              {% if messages %}
-                {% for category, message in messages %}
-                  <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} mt-3">{{ message }}</div>
-                {% endfor %}
-              {% endif %}
+        <div class="card p-4 text-center">
+            <h1 class="fw-bold">🎾 Saturday Tennis Gang @ Dawson</h1>
+            <p class="text-muted fs-4 mb-1">{{ target_date }} — {{ start_time }}</p>
+            <div><span class="badge bg-info text-dark p-2">{{ weather }}</span></div>
+            {% with msgs = get_flashed_messages() %}
+                {% if msgs %}{% for m in msgs %}<div class="alert alert-danger mt-3">{{ m }}</div>{% endfor %}{% endif %}
             {% endwith %}
         </div>
 
-        {% if session.user %}
-        <div class="header-card">
-            <h3>Hello, {{ session.user.first }}!</h3>
-            
-            {% if waitlist_pos > 0 %}
-                <div class="alert alert-warning" style="font-weight:bold;">
-                    ⏳ You are currently #{{ waitlist_pos }} on the Waitlist.
-                </div>
-            {% endif %}
-
-            {% if strikes > 0 %}
-                <p class="text-danger small">⚠️ Strike Count: {{ strikes }} (3 strikes = suspension)</p>
-            {% endif %}
-
-            <div class="d-grid gap-2 d-md-block mt-3">
-                {% if user_on_roster %}
-                    <form action="/cancel" method="POST" style="display:inline;">
-                        {% if is_past_deadline %}
-                            <button type="submit" class="btn btn-warning btn-lg">Request a Sub</button>
-                        {% else %}
-                            <button type="submit" class="btn btn-danger btn-lg">Drop Out</button>
-                        {% endif %}
-                    </form>
-                {% else %}
-                    <form action="/signup" method="POST" style="display:inline;">
-                        <button type="submit" class="btn btn-success btn-lg" {% if strikes >= 3 %}disabled{% endif %}>
-                            Sign Up for This Week
-                        </button>
-                    </form>
+        {% if session.get('user') %}
+            <div class="card p-4 text-center">
+                <h3>Hi, {{ session.user.first }}!</h3>
+                {% if waitlist_pos > 0 %}
+                    <div class="alert alert-warning">⏳ You are #{{ waitlist_pos }} on the Waitlist</div>
                 {% endif %}
-                <a href="/logout" class="btn btn-outline-secondary btn-lg">Logout</a>
+                {% if strikes > 0 %}
+                    <p class="text-danger small">Strikes: {{ strikes }} / 3</p>
+                {% endif %}
+                <div class="mt-3">
+                    {% if user_on_roster %}
+                        <form action="/cancel" method="POST" style="display:inline;"><button type="submit" class="btn btn-danger btn-lg px-5">Drop Out</button></form>
+                    {% else %}
+                        <form action="/signup" method="POST" style="display:inline;"><button type="submit" class="btn btn-success btn-lg px-5">Sign Up for This Week</button></form>
+                    {% endif %}
+                    <div class="mt-2"><a href="/logout" class="text-muted small">Logout</a></div>
+                </div>
             </div>
-        </div>
         {% else %}
-        <div class="login-box">
-            <form action="/validate" method="POST">
-                <div class="mb-2">
-                    <label class="form-label">Enter Player Code</label>
-                    <input type="text" name="code" id="player-code" class="form-control form-control-lg text-center" 
-                           placeholder="Replace this with your 4-digit code" maxlength="4" required>
-                </div>
-                
-                <div id="admin-password-group">
-                    <label class="form-label">Admin Password Required</label>
-                    <input type="password" name="password" class="form-control" placeholder="••••••••">
-                </div>
-                
-                <button type="submit" class="btn btn-primary btn-lg w-100 mt-3">Continue</button>
-            </form>
-        </div>
+            <div class="card p-4 text-center">
+                <form action="/validate" method="POST">
+                    <label class="form-label fw-bold">Player Login</label>
+                    <input type="text" name="code" id="p-code" class="form-control form-control-lg text-center mb-3" placeholder="Replace this with your 4-digit code" required>
+                    <div id="admin-pass" style="display:none;" class="mb-3">
+                        <input type="password" name="password" class="form-control" placeholder="Admin Password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100">Continue</button>
+                </form>
+            </div>
         {% endif %}
 
-        <h4 class="mb-3">Confirmed Players (Courts 1-6)</h4>
-        <div class="court-grid">
+        <h4 class="mb-3 fw-bold">Roster</h4>
+        <div class="row">
             {% for i in range(0, 24, 4) %}
-            <div class="court-box">
-                <div class="court-header">
-                    <span>Court {{ (i/4)|int + 1 }}</span>
-                    <small>{{ roster[i:i+4]|length }}/4</small>
+                <div class="col-md-4 col-sm-6">
+                    <div class="court-box">
+                        <div class="fw-bold text-success border-bottom mb-2 pb-1">Court {{ (i/4)|int + 1 }}</div>
+                        <ul class="roster-list">
+                            {% for j in range(i, i+4) %}
+                                <li>{{ roster[j].First + " " + roster[j].Last if roster[j] else "Open Spot" }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
                 </div>
-                <ul class="roster-list">
-                    {% for j in range(i, i+4) %}
-                        <li>
-                            {% if roster[j] %}
-                                <span>{{ loop.index + i }}. {{ roster[j].First }} {{ roster[j].Last }}</span>
-                            {% else %}
-                                <span class="text-muted small">Open Spot</span>
-                            {% endif %}
-                        </li>
-                    {% endfor %}
-                </ul>
-            </div>
             {% endfor %}
         </div>
 
         {% if roster|length > 24 %}
-        <div class="court-box waitlist-box">
-            <div class="court-header waitlist-header">Current Waitlist</div>
-            <ul class="roster-list">
-                {% for player in roster[24:] %}
-                <li>
-                    <span>{{ player.First }} {{ player.Last }}</span>
-                    <span class="badge bg-warning text-dark">#{{ loop.index }}</span>
-                </li>
-                {% endfor %}
-            </ul>
-        </div>
+            <div class="court-box" style="border-left-color: #ffc107;">
+                <div class="fw-bold text-warning border-bottom mb-2 pb-1">Waitlist</div>
+                <ul class="roster-list">
+                    {% for p in roster[24:] %}
+                        <li><span>{{ p.First }} {{ p.Last }}</span> <span class="badge bg-light text-dark">#{{ loop.index }}</span></li>
+                    {% endfor %}
+                </ul>
+            </div>
         {% endif %}
 
         {% if injured_players %}
-        <div class="court-box injury-box">
-            <div class="court-header injury-header">🚑 Injured List</div>
-            <ul class="roster-list">
-                {% for p in injured_players %}
-                <li>
-                    <span>{{ p.First }} {{ p.Last }}</span>
-                    <small class="text-danger">Return: {{ p['Expected Return'] }}</small>
-                </li>
-                {% endfor %}
-            </ul>
-        </div>
+            <div class="court-box" style="border-left-color: #dc3545;">
+                <div class="fw-bold text-danger border-bottom mb-2 pb-1">🚑 Injured List</div>
+                <ul class="roster-list">
+                    {% for p in injured_players %}
+                        <li><span>{{ p.First }} {{ p.Last }}</span> <small class="text-muted">Return: {{ p['Expected Return'] }}</small></li>
+                    {% endfor %}
+                </ul>
+            </div>
         {% endif %}
 
-        {% if session.user and session.user.code == '9999' and session.user.is_admin %}
-        <div class="admin-panel">
-            <h5>Admin Dashboard</h5>
-            <hr>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <p class="small mb-1">Weekly Settings</p>
-                    <form action="/update_settings" method="POST">
-                        <input type="text" name="target_date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
-                        <input type="text" name="start_time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
-                        <button type="submit" class="btn btn-info btn-sm w-100">Sync Date/Time</button>
-                    </form>
+        {% if session.get('user') and session.user.is_admin %}
+            <div class="admin-section">
+                <h5>🛠 Admin Command Center</h5>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <h6>Change Date/Time</h6>
+                        <p class="instruction-text">Updates labels at top of app.</p>
+                        <form action="/update_settings" method="POST">
+                            <input type="text" name="target_date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
+                            <input type="text" name="start_time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
+                            <button class="btn btn-warning btn-sm w-100">Update Public Labels</button>
+                        </form>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Mark Player Injured</h6>
+                        <p class="instruction-text">Moves player to Injury section.</p>
+                        <form action="/report_injury" method="POST">
+                            <input type="text" name="player_code" class="form-control form-control-sm mb-1" placeholder="4-Digit Code">
+                            <input type="text" name="return_date" class="form-control form-control-sm mb-2" placeholder="Return Date">
+                            <button class="btn btn-outline-warning btn-sm w-100">Confirm Injury</button>
+                        </form>
+                    </div>
                 </div>
+                <div class="text-center border-top pt-3 mt-2"><p class="instruction-text">To reset for a new week, manually delete all rows in the Signups tab in Airtable.</p></div>
             </div>
-        </div>
         {% endif %}
     </div>
 
     <script>
-        const codeInput = document.getElementById('player-code');
-        const passwordGroup = document.getElementById('admin-password-group');
-
-        codeInput.addEventListener('input', function() {
-            if (this.value === '9999') {
-                passwordGroup.style.display = 'block';
-            } else {
-                passwordGroup.style.display = 'none';
-            }
+        document.getElementById('p-code').addEventListener('input', function() {
+            document.getElementById('admin-pass').style.display = (this.value === '9999' ? 'block' : 'none');
         });
     </script>
 </body>
