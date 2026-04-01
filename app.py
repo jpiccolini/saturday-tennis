@@ -14,10 +14,8 @@ W_KEY = os.environ.get("WEATHER_API_KEY")
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 def get_airtable_data(table_name):
-    """Fetches records. We removed the explicit 'createdTime' sort to fix the 422 error."""
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
-    # This keeps the order exactly as seen in the Airtable Grid view
-    url += "?view=Grid%20view"
+    """Fetches records using the default Grid view order to avoid 422 errors."""
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}?view=Grid%20view"
     try:
         r = requests.get(url, headers=HEADERS)
         if r.status_code == 200:
@@ -39,7 +37,7 @@ def index():
         d_date = f.get('Target Date', 'TBD')
         d_start = f.get('Start Time', 'TBD')
 
-    # 2. Roster
+    # 2. Roster & User Status
     signup_recs = get_airtable_data("Signups")
     roster = []
     user_on_roster = False
@@ -52,27 +50,32 @@ def index():
         roster.append(fields)
         if curr_user and str(fields.get('Player Code')) == str(curr_user.get('code')):
             user_on_roster = True
-            if i >= 24: waitlist_pos = i - 23
+            if i >= 24: 
+                waitlist_pos = i - 23
 
-    # 3. Weather (Saturday morning)
+    # 3. Weather (Saturday morning + 3 hours)
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
-        sat_forecast = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
-        if sat_forecast:
-            # 8 AM and 11 AM
-            t8 = int(sat_forecast['hour'][8]['temp_f'])
-            t11 = int(sat_forecast['hour'][11]['temp_f'])
-            cond = sat_forecast['hour'][8]['condition']['text']
+        sat = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
+        if sat:
+            t8 = int(sat['hour'][8]['temp_f'])
+            t11 = int(sat['hour'][11]['temp_f'])
+            cond = sat['hour'][8]['condition']['text']
             weather_info = f"Sat: {cond}, {t8}°F → {t11}°F"
     except: pass
 
-    # 4. Injuries
+    # 4. Injuries & Strikes
     master = get_airtable_data("Master List")
     injured = [r['fields'] for r in master if r['fields'].get('Injury Status') == 'Injured']
+    
+    strikes = 0
+    if curr_user:
+        archive = get_airtable_data("Archive")
+        strikes = sum(1 for r in archive if str(r['fields'].get('Player Code')) == str(curr_user.get('code')) and r['fields'].get('Attendance') == 'No Show')
 
     return render_template('index.html', target_date=d_date, start_time=d_start, 
-                           roster=roster, injured_players=injured,
+                           roster=roster, injured_players=injured, strikes=strikes,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
 
 @app.route('/validate', methods=['POST'])
@@ -86,7 +89,7 @@ def validate():
             is_admin = (code == '9999' and password == ADMIN_PW)
             session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
             return redirect(url_for('index'))
-    flash(f"Code {code} not found.", "error")
+    flash(f"Code {code} not found in Master List.", "error")
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
