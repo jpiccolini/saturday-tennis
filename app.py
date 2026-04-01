@@ -28,7 +28,7 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None):
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
     params = {}
     
-    # THE FIX: Only check for empty names on tables that actually have names!
+    # Only check for empty names on tables that actually have names!
     if table_name in ["Signups", "Master List", "Applicants"]:
         base_formula = "NOT({First} = '')"
         if filter_formula:
@@ -117,12 +117,18 @@ def admin_action():
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{pid}", headers=HEADERS, json={"fields": {"Notes": note}})
     return redirect(url_for('index'))
 
-@app.route('/no_show/<code_val>', methods=['POST'])
-def no_show(code_val):
+@app.route('/attendance/<code_val>', methods=['POST'])
+def attendance(code_val):
+    """Logs Late or No Show in the Archive table."""
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    
+    status = request.form.get('status') # Will be 'Late' or 'No Show'
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, 
-                  json={"fields": {"Player Code": str(code_val), "Attendance": "No Show", "Date": datetime.now().strftime("%Y-%m-%d")}})
-    flash("Strike Logged", "warning"); return redirect(url_for('index'))
+                  json={"fields": {"Player Code": str(code_val), "Attendance": status, "Date": datetime.now().strftime("%Y-%m-%d")}})
+    
+    # Just a little visual feedback in your server logs/terminal if needed
+    print(f"Logged {status} for code {code_val}")
+    return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
 def signup():
