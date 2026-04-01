@@ -11,7 +11,7 @@
         .weather-box { background: #e8f5e9; border-radius: 8px; padding: 15px; border-left: 5px solid #2e7d32; font-size: 1.35rem; font-weight: bold; }
         .guidelines-box { background: white; border-radius: 8px; padding: 20px; border: 1px solid #ddd; margin-top: 2rem; }
         .footer-text { font-size: 0.9rem; color: #666; text-align: center; margin-top: 2rem; padding-bottom: 2rem; }
-        .admin-scroll { max-height: 450px; overflow-y: auto; }
+        .admin-scroll { max-height: 450px; overflow-y: auto; border: 1px solid #eee; }
     </style>
 </head>
 <body>
@@ -132,13 +132,18 @@
             <div class="column">
                 <div class="box has-text-dark">
                     <h4 class="label">Injury Tracker & Attendance</h4>
+                    
+                    <div class="control mb-3">
+                        <input type="text" id="playerSearchInput" class="input is-info is-small" placeholder="🔍 Search by name..." onkeyup="filterAdminTable()">
+                    </div>
+
                     <div class="admin-scroll">
-                        <table class="table is-narrow is-fullwidth is-hoverable">
+                        <table class="table is-narrow is-fullwidth is-hoverable" id="adminPlayerTable">
                             <thead><tr><th>Name</th><th>Note/Injury</th><th>Attendance</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
-                                    <td class="is-size-7">{{ m.fields.First }} {{ m.fields.Last }}</td>
+                                    <td class="is-size-7 has-text-weight-bold">{{ m.fields.First }} {{ m.fields.Last }}</td>
                                     <td>
                                         <form action="/admin_action" method="post" class="is-flex">
                                             <input type="hidden" name="player_id" value="{{ m.id }}">
@@ -195,6 +200,27 @@
         </form>
     </div></div>
 </div>
+
+<script>
+    function filterAdminTable() {
+        let input = document.getElementById("playerSearchInput").value.toLowerCase();
+        let table = document.getElementById("adminPlayerTable");
+        let rows = table.getElementsByTagName("tr");
+
+        // Loop through all table rows, and hide those who don't match the search query
+        for (let i = 1; i < rows.length; i++) { // start at 1 to skip the header row
+            let nameCell = rows[i].getElementsByTagName("td")[0];
+            if (nameCell) {
+                let nameText = nameCell.textContent || nameCell.innerText;
+                if (nameText.toLowerCase().indexOf(input) > -1) {
+                    rows[i].style.display = "";
+                } else {
+                    rows[i].style.display = "none";
+                }
+            }
+        }
+    }
+</script>
 
 </body>
 </html>
