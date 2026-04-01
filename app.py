@@ -14,7 +14,7 @@ W_KEY = os.environ.get("WEATHER_API_KEY")
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 def get_airtable_data(table_name, sort=False):
-    """Tries to find the table in Airtable; handles potential naming mismatches."""
+    """Fetches records from Airtable. table_name must match Airtable tab name exactly."""
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
     if sort:
         url += "?sort%5B0%5D%5Bfield%5D=createdTime&sort%5B0%5D%5Bdirection%5D=asc"
@@ -22,12 +22,16 @@ def get_airtable_data(table_name, sort=False):
         r = requests.get(url, headers=HEADERS)
         if r.status_code == 200:
             return r.json().get('records', [])
-    except: pass
-    return []
+        else:
+            print(f"Airtable Error {r.status_code}: {r.text}")
+            return []
+    except Exception as e:
+        print(f"Connection Error: {e}")
+        return []
 
 @app.route('/')
 def index():
-    # 1. Fetch Settings
+    # 1. Fetch Settings (Exact Table Name: 'Settings')
     settings = get_airtable_data("Settings")
     d_date, d_start = "TBD", "TBD"
     if settings:
@@ -35,7 +39,7 @@ def index():
         d_date = f.get('Target Date', 'TBD')
         d_start = f.get('Start Time', 'TBD')
 
-    # 2. Fetch Roster & Waitlist
+    # 2. Fetch Roster (Exact Table Name: 'Signups')
     signup_recs = get_airtable_data("Signups", sort=True)
     roster = []
     user_on_roster = False
@@ -50,30 +54,25 @@ def index():
             user_on_roster = True
             if i >= 24: waitlist_pos = i - 23
 
-    # 3. Weather (Saturday & 3 hours later)
+    # 3. Weather (Saturday Start + 3 Hours)
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=Lafayette,CO&days=7").json()
-        # Find Saturday in the forecast
         sat_forecast = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
         if sat_forecast:
-            # Get 8 AM and 11 AM temps (adjust index if start time varies)
-            temp_start = sat_forecast['hour'][8]['temp_f']
-            cond_start = sat_forecast['hour'][8]['condition']['text']
-            temp_end = sat_forecast['hour'][11]['temp_f']
-            weather_info = f"Sat: {cond_start}, {int(temp_start)}°F → {int(temp_end)}°F"
+            # Assumes 8 AM start - we fetch index 8 and 11
+            t_start = int(sat_forecast['hour'][8]['temp_f'])
+            t_end = int(sat_forecast['hour'][11]['temp_f'])
+            cond = sat_forecast['hour'][8]['condition']['text']
+            weather_info = f"Sat: {cond}, {t_start}°F → {t_end}°F"
     except: pass
 
-    # 4. Injuries & Strikes
+    # 4. Injuries (Exact Table Name: 'Master List')
     master = get_airtable_data("Master List")
     injured = [r['fields'] for r in master if r['fields'].get('Injury Status') == 'Injured']
-    strikes = 0
-    if curr_user:
-        archive = get_airtable_data("Archive")
-        strikes = sum(1 for r in archive if str(r['fields'].get('Player Code')) == str(curr_user.get('code')) and r['fields'].get('Attendance') == 'No Show')
 
     return render_template('index.html', target_date=d_date, start_time=d_start, 
-                           roster=roster, injured_players=injured, strikes=strikes,
+                           roster=roster, injured_players=injured,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
 
 @app.route('/validate', methods=['POST'])
@@ -84,17 +83,19 @@ def validate():
     for r in master:
         f = r.get('fields', {})
         if str(f.get('Code')) == code:
-            session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': (code == '9999' and password == ADMIN_PW)}
+            is_admin = (code == '9999' and password == ADMIN_PW)
+            session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
             return redirect(url_for('index'))
-    flash("Code Not Found", "error")
+    flash(f"Code {code} not found in Master List.", "error")
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
 def signup():
     if not session.get('user'): return redirect(url_for('index'))
     count = len(get_airtable_data("Signups"))
+    status = "Confirmed" if count < 24 else "Waitlist"
     data = {"fields": {"First": session['user']['first'], "Last": session['user']['last'], 
-                       "Player Code": str(session['user']['code']), "Status": "Confirmed" if count < 24 else "Waitlist"}}
+                       "Player Code": str(session['user']['code']), "Status": status}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=data)
     return redirect(url_for('index'))
 
@@ -103,7 +104,28 @@ def cancel():
     if not session.get('user'): return redirect(url_for('index'))
     recs = get_airtable_data("Signups")
     rid = next((r['id'] for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
-    if rid: requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{rid}", headers=HEADERS)
+    if rid:
+        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{rid}", headers=HEADERS)
+    return redirect(url_for('index'))
+
+@app.route('/update_settings', methods=['POST'])
+def update_settings():
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    recs = get_airtable_data("Settings")
+    if recs:
+        data = {"fields": {"Target Date": request.form.get('target_date'), "Start Time": request.form.get('start_time')}}
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{recs[0]['id']}", headers=HEADERS, json=data)
+    return redirect(url_for('index'))
+
+@app.route('/report_injury', methods=['POST'])
+def report_injury():
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    code = request.form.get('player_code')
+    master = get_airtable_data("Master List")
+    rid = next((r['id'] for r in master if str(r['fields'].get('Code')) == code), None)
+    if rid:
+        data = {"fields": {"Injury Status": "Injured", "Expected Return": request.form.get('return_date')}}
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{rid}", headers=HEADERS, json=data)
     return redirect(url_for('index'))
 
 @app.route('/logout')
