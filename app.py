@@ -32,11 +32,18 @@ def send_email(to_email, subject, html_content):
         print(f"SendGrid Error: {e}")
 
 def get_airtable_data(table_name):
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}?view=Grid%20view"
+    """Fetch all records without view restrictions."""
+    # Removed the ?view=Grid%20view part to be more broad
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
     try:
         r = requests.get(url, headers=HEADERS)
-        return r.json().get('records', []) if r.status_code == 200 else []
-    except: return []
+        if r.status_code == 200:
+            return r.json().get('records', [])
+        else:
+            print(f"Airtable Error {r.status_code}: {r.text}")
+    except Exception as e:
+        print(f"Error fetching {table_name}: {e}")
+    return []
 
 def get_next_code():
     master = get_airtable_data("Master List")
