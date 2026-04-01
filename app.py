@@ -53,14 +53,20 @@ def index():
             weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
-    # 4. Master List (for Admin Dropdown)
+    # 4. Master List & Strike Count
     master = get_airtable_data("Master List")
     injured = [r['fields'] for r in master if r['fields'].get('Injury Status') == 'Injured']
     players_list = sorted([r['fields'] for r in master], key=lambda x: x.get('First', ''))
+    
+    strikes = 0
+    if curr_user:
+        archive = get_airtable_data("Archive")
+        strikes = sum(1 for r in archive if str(r['fields'].get('Player Code')) == str(curr_user.get('code')) and r['fields'].get('Attendance') == 'No Show')
 
     return render_template('index.html', target_date=d_date, start_time=d_start, 
                            roster=roster, injured_players=injured, players=players_list,
-                           user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
+                           user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, 
+                           strikes=strikes, weather=weather_info)
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -120,3 +126,4 @@ def admin_action():
 @app.route('/logout')
 def logout():
     session.clear(); return redirect(url_for('index'))
+    
