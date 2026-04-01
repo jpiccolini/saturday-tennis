@@ -27,12 +27,16 @@ def send_email(to_email, subject, html_content):
 def get_airtable_data(table_name, filter_formula=None, sort_field=None):
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
     params = {}
-    # This formula ensures we only get rows where 'First' is not empty (Removes blank rows)
-    base_formula = "NOT({First} = '')"
-    if filter_formula:
-        params['filterByFormula'] = f"AND({base_formula}, {filter_formula})"
-    else:
-        params['filterByFormula'] = base_formula
+    
+    # THE FIX: Only check for empty names on tables that actually have names!
+    if table_name in ["Signups", "Master List", "Applicants"]:
+        base_formula = "NOT({First} = '')"
+        if filter_formula:
+            params['filterByFormula'] = f"AND({base_formula}, {filter_formula})"
+        else:
+            params['filterByFormula'] = base_formula
+    elif filter_formula:
+        params['filterByFormula'] = filter_formula
         
     if sort_field:
         params['sort[0][field]'] = sort_field
