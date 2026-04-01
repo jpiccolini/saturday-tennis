@@ -8,63 +8,59 @@
     <style>
         body { background: #f8f9fa; font-family: sans-serif; }
         .container { max-width: 900px; margin-top: 30px; padding-bottom: 60px; }
-        .card { border-radius: 15px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
-        .court-box { background: white; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 20px; min-height: 160px; }
+        .card { border-radius: 15px; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .court-box { background: white; padding: 15px; border-radius: 10px; border-left: 5px solid #198754; margin-bottom: 20px; min-height: 160px; }
         .roster-list { list-style: none; padding: 0; margin: 0; }
-        .roster-list li { padding: 8px 0; border-bottom: 1px solid #f1f1f1; display: flex; justify-content: space-between; font-size: 0.9rem; }
+        .roster-list li { padding: 6px 0; border-bottom: 1px solid #f1f1f1; display: flex; justify-content: space-between; font-size: 0.95rem; }
         .admin-section { background: #212529; color: #fff; border-radius: 12px; padding: 25px; margin-top: 40px; }
-        .admin-section h5 { color: #ffc107; margin-bottom: 15px; }
-        .instruction-text { font-size: 0.8rem; color: #adb5bd; margin-bottom: 10px; }
+        .admin-section h5 { color: #ffc107; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="card p-4 text-center">
-            <h1 class="fw-bold">🎾 Saturday Tennis Gang @ Dawson</h1>
-            <p class="text-muted fs-4 mb-1">{{ target_date }} — {{ start_time }}</p>
+            <h1 class="fw-bold">🎾 Saturday Tennis Gang</h1>
+            <p class="text-muted fs-4 mb-2">{{ target_date }} — {{ start_time }}</p>
             <div><span class="badge bg-info text-dark p-2">{{ weather }}</span></div>
             {% with msgs = get_flashed_messages() %}
-                {% if msgs %}{% for m in msgs %}<div class="alert alert-danger mt-3">{{ m }}</div>{% endfor %}{% endif %}
+                {% if msgs %}{% for m in msgs %}<div class="alert alert-info mt-3">{{ m }}</div>{% endfor %}{% endif %}
             {% endwith %}
         </div>
 
         {% if session.get('user') %}
             <div class="card p-4 text-center">
                 <h3>Hi, {{ session.user.first }}!</h3>
-                {% if waitlist_pos > 0 %}
-                    <div class="alert alert-warning">⏳ You are #{{ waitlist_pos }} on the Waitlist</div>
-                {% endif %}
-                {% if strikes > 0 %}
-                    <p class="text-danger small">Strikes: {{ strikes }} / 3</p>
-                {% endif %}
                 <div class="mt-3">
                     {% if user_on_roster %}
-                        <form action="/cancel" method="POST" style="display:inline;"><button type="submit" class="btn btn-danger btn-lg px-5">Drop Out</button></form>
+                        <div class="alert alert-success d-inline-block px-4">✅ You are on the roster</div>
+                        {% if waitlist_pos > 0 %}
+                            <div class="alert alert-warning mt-2">You are #{{ waitlist_pos }} on the Waitlist</div>
+                        {% endif %}
+                        <br>
+                        <form action="/cancel" method="POST"><button type="submit" class="btn btn-danger px-5">Drop Out</button></form>
                     {% else %}
-                        <form action="/signup" method="POST" style="display:inline;"><button type="submit" class="btn btn-success btn-lg px-5">Sign Up for This Week</button></form>
+                        <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg px-5">Sign Up for This Week</button></form>
                     {% endif %}
-                    <div class="mt-2"><a href="/logout" class="text-muted small">Logout</a></div>
                 </div>
+                <div class="mt-2"><a href="/logout" class="text-muted small">Logout</a></div>
             </div>
         {% else %}
             <div class="card p-4 text-center">
                 <form action="/validate" method="POST">
-                    <label class="form-label fw-bold">Player Login</label>
-                    <input type="text" name="code" id="p-code" class="form-control form-control-lg text-center mb-3" placeholder="Replace this with your 4-digit code" required>
-                    <div id="admin-pass" style="display:none;" class="mb-3">
-                        <input type="password" name="password" class="form-control" placeholder="Admin Password">
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-lg w-100">Continue</button>
+                    <label class="form-label fw-bold">Enter Player Code</label>
+                    <input type="text" name="code" id="p-code" class="form-control form-control-lg text-center mb-3" placeholder="4-Digit Code" required>
+                    <div id="admin-pass" style="display:none;" class="mb-3"><input type="password" name="password" class="form-control" placeholder="Admin Password"></div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100">Sign In</button>
                 </form>
             </div>
         {% endif %}
 
-        <h4 class="mb-3 fw-bold">Roster</h4>
+        <h4 class="mb-3 fw-bold">Court Assignments</h4>
         <div class="row">
             {% for i in range(0, 24, 4) %}
-                <div class="col-md-4 col-sm-6">
+                <div class="col-md-4">
                     <div class="court-box">
-                        <div class="fw-bold text-success border-bottom mb-2 pb-1">Court {{ (i/4)|int + 1 }}</div>
+                        <div class="fw-bold text-success border-bottom mb-2">Court {{ (i/4)|int + 1 }}</div>
                         <ul class="roster-list">
                             {% for j in range(i, i+4) %}
                                 <li>{{ roster[j].First + " " + roster[j].Last if roster[j] else "Open Spot" }}</li>
@@ -77,21 +73,10 @@
 
         {% if roster|length > 24 %}
             <div class="court-box" style="border-left-color: #ffc107;">
-                <div class="fw-bold text-warning border-bottom mb-2 pb-1">Waitlist</div>
+                <div class="fw-bold text-warning border-bottom mb-2">Waitlist</div>
                 <ul class="roster-list">
                     {% for p in roster[24:] %}
-                        <li><span>{{ p.First }} {{ p.Last }}</span> <span class="badge bg-light text-dark">#{{ loop.index }}</span></li>
-                    {% endfor %}
-                </ul>
-            </div>
-        {% endif %}
-
-        {% if injured_players %}
-            <div class="court-box" style="border-left-color: #dc3545;">
-                <div class="fw-bold text-danger border-bottom mb-2 pb-1">🚑 Injured List</div>
-                <ul class="roster-list">
-                    {% for p in injured_players %}
-                        <li><span>{{ p.First }} {{ p.Last }}</span> <small class="text-muted">Return: {{ p['Expected Return'] }}</small></li>
+                        <li>{{ p.First }} {{ p.Last }} <span class="badge bg-light text-dark">#{{ loop.index }}</span></li>
                     {% endfor %}
                 </ul>
             </div>
@@ -101,30 +86,36 @@
             <div class="admin-section">
                 <h5>🛠 Admin Command Center</h5>
                 <div class="row">
-                    <div class="col-md-6 mb-3">
-                        <h6>Change Date/Time</h6>
-                        <p class="instruction-text">Updates labels at top of app.</p>
-                        <form action="/update_settings" method="POST">
-                            <input type="text" name="target_date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
-                            <input type="text" name="start_time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
+                    <div class="col-md-6 mb-4">
+                        <h6>Update Labels</h6>
+                        <form action="/admin_action" method="POST">
+                            <input type="hidden" name="action" value="labels">
+                            <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
+                            <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
                             <button class="btn btn-warning btn-sm w-100">Update Public Labels</button>
                         </form>
                     </div>
                     <div class="col-md-6">
-                        <h6>Mark Player Injured</h6>
-                        <p class="instruction-text">Moves player to Injury section.</p>
-                        <form action="/report_injury" method="POST">
-                            <input type="text" name="player_code" class="form-control form-control-sm mb-1" placeholder="4-Digit Code">
-                            <input type="text" name="return_date" class="form-control form-control-sm mb-2" placeholder="Return Date">
-                            <button class="btn btn-outline-warning btn-sm w-100">Confirm Injury</button>
+                        <h6>Attendance Tracker</h6>
+                        <form action="/admin_action" method="POST">
+                            <input type="hidden" name="action" value="strike">
+                            <select name="player_code" class="form-select form-select-sm mb-2">
+                                <option value="">Select No-Show Player...</option>
+                                {% for p in players %}
+                                    <option value="{{ p.Code }}">{{ p.First }} {{ p.Last }}</option>
+                                {% endfor %}
+                            </select>
+                            <button class="btn btn-danger btn-sm w-100">Log "No Show" Strike</button>
                         </form>
                     </div>
                 </div>
-                <div class="text-center border-top pt-3 mt-2"><p class="instruction-text">To reset for a new week, manually delete all rows in the Signups tab in Airtable.</p></div>
+                <div class="mt-3 p-3 border border-secondary rounded">
+                    <h6 class="text-warning small fw-bold">WEEKLY RESET:</h6>
+                    <p class="small text-muted mb-0">Manually delete all rows in the <b>Signups</b> tab in Airtable to clear the courts.</p>
+                </div>
             </div>
         {% endif %}
     </div>
-
     <script>
         document.getElementById('p-code').addEventListener('input', function() {
             document.getElementById('admin-pass').style.display = (this.value === '9999' ? 'block' : 'none');
