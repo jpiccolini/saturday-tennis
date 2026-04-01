@@ -1,6 +1,6 @@
 import os, requests
 from flask import Flask, render_template, request, session, redirect, url_for, flash
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
@@ -21,13 +21,18 @@ def get_airtable_data(table_name):
 
 @app.route('/')
 def index():
-    # 1. Settings
+    # 1. Settings & End Time Calculation
     settings = get_airtable_data("Settings")
-    d_date, d_start = "TBD", "TBD"
+    d_date, d_start, d_end = "TBD", "TBD", ""
     if settings:
         f = settings[0]['fields']
         d_date = f.get('Target Date', 'TBD')
         d_start = f.get('Start Time', 'TBD')
+        try:
+            start_dt = datetime.strptime(d_start, "%I:%M %p")
+            end_dt = start_dt + timedelta(hours=2, minutes=15)
+            d_end = f" – {end_dt.strftime('%I:%M %p').lstrip('0')}"
+        except: d_end = ""
 
     # 2. Roster & User Status
     signup_recs = get_airtable_data("Signups")
@@ -50,10 +55,10 @@ def index():
         sat = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
         if sat:
             t8, t11 = int(sat['hour'][8]['temp_f']), int(sat['hour'][11]['temp_f'])
-            weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
+            weather_info = f"Sat Forecast: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
-    # 4. Master List & Strike Count
+    # 4. Master List & Strikes
     master = get_airtable_data("Master List")
     injured = [r['fields'] for r in master if r['fields'].get('Injury Status') == 'Injured']
     players_list = sorted([r['fields'] for r in master], key=lambda x: x.get('First', ''))
@@ -63,7 +68,7 @@ def index():
         archive = get_airtable_data("Archive")
         strikes = sum(1 for r in archive if str(r['fields'].get('Player Code')) == str(curr_user.get('code')) and r['fields'].get('Attendance') == 'No Show')
 
-    return render_template('index.html', target_date=d_date, start_time=d_start, 
+    return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end,
                            roster=roster, injured_players=injured, players=players_list,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, 
                            strikes=strikes, weather=weather_info)
@@ -107,11 +112,13 @@ def cancel():
 def admin_action():
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     action = request.form.get('action')
+    
     if action == 'labels':
         recs = get_airtable_data("Settings")
         if recs:
             payload = {"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}}
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{recs[0]['id']}", headers=HEADERS, json=payload)
+    
     elif action == 'strike':
         code = request.form.get('player_code')
         master = get_airtable_data("Master List")
@@ -121,9 +128,15 @@ def admin_action():
                                "Attendance": "No Show", "Date": datetime.now().strftime("%Y-%m-%d")}}
             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=payload)
             flash(f"Strike recorded for {p.get('First')}.", "success")
+
+    elif action == 'reset_roster':
+        recs = get_airtable_data("Signups")
+        for r in recs:
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+        flash("Roster cleared successfully.", "success")
+
     return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
     session.clear(); return redirect(url_for('index'))
-    
