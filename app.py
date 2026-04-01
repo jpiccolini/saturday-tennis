@@ -16,42 +16,30 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL")
 
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
-def send_email(to_email, subject, html_content):
-    if not SG_KEY or not FROM_EMAIL: return
-    message = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html_content)
-    try:
-        sg = SendGridAPIClient(SG_KEY)
-        sg.send(message)
-    except: pass
+def log_activity(name, action):
+    """Saves visit to Logs table in Airtable."""
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
+                  json={"fields": {"Name": name, "Action": action}})
 
-def get_airtable_data(table_name, filter_formula=None, sort_field=None):
+def get_airtable_data(table_name, filter_formula=None, sort_field=None, max_records=None, direction="asc"):
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
     params = {}
-    
-    # Only check for empty names on tables that actually have names!
     if table_name in ["Signups", "Master List", "Applicants"]:
         base_formula = "NOT({First} = '')"
-        if filter_formula:
-            params['filterByFormula'] = f"AND({base_formula}, {filter_formula})"
-        else:
-            params['filterByFormula'] = base_formula
+        params['filterByFormula'] = f"AND({base_formula}, {filter_formula})" if filter_formula else base_formula
     elif filter_formula:
         params['filterByFormula'] = filter_formula
         
     if sort_field:
         params['sort[0][field]'] = sort_field
-        params['sort[0][direction]'] = "asc"
+        params['sort[0][direction]'] = direction
+    if max_records:
+        params['maxRecords'] = max_records
     
     try:
         r = requests.get(url, headers=HEADERS, params=params)
         return r.json().get('records', []) if r.status_code == 200 else []
     except: return []
-
-def log_activity(name, action):
-    """Logs user activity to the Logs table."""
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", 
-                  headers=HEADERS, 
-                  json={"fields": {"Name": name, "Action": action}})
 
 @app.route('/')
 def index():
@@ -86,37 +74,29 @@ def index():
             weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
-    applicants, master_list = [], []
+    applicants, master_list, recent_logs = [], [], []
     if curr_user and curr_user.get('is_admin'):
         applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
         master_list = get_airtable_data("Master List", sort_field="First")
+        # GET LAST 10 LOGS (Sorted by newest first)
+        recent_logs = get_airtable_data("Logs", sort_field="Timestamp", direction="desc", max_records=10)
 
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
-                           applicants=applicants, master_list=master_list, user_on_roster=user_on_roster, 
-                           waitlist_pos=waitlist_pos, weather=weather_info)
+                           applicants=applicants, master_list=master_list, logs=recent_logs,
+                           user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
 
-# --- UPDATE YOUR /validate ROUTE ---
 @app.route('/validate', methods=['POST'])
 def validate():
     code = str(request.form.get('code', '')).strip()
     password = request.form.get('password')
-    formula = f"{{Code}}='{code}'"
-    records = get_airtable_data("Master List", filter_formula=formula)
-    
+    records = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code}'")
     if records:
         f = records[0]['fields']
-        is_admin = (password == ADMIN_PW)
-        user_name = f"{f.get('First')} {f.get('Last')}"
-        
-        session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
-        
-        # LOG THE VISIT HERE
-        log_activity(user_name, "Login")
-        
+        name = f"{f.get('First')} {f.get('Last')}"
+        session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': (password == ADMIN_PW)}
+        log_activity(name, "Login")
         return redirect(url_for('index'))
-    
-    flash("Invalid Code", "error")
-    return redirect(url_for('index'))
+    flash("Invalid Code", "error"); return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
@@ -135,15 +115,10 @@ def admin_action():
 
 @app.route('/attendance/<code_val>', methods=['POST'])
 def attendance(code_val):
-    """Logs Late or No Show in the Archive table."""
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    
-    status = request.form.get('status') # Will be 'Late' or 'No Show'
+    status = request.form.get('status')
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, 
                   json={"fields": {"Player Code": str(code_val), "Attendance": status, "Date": datetime.now().strftime("%Y-%m-%d")}})
-    
-    # Just a little visual feedback in your server logs/terminal if needed
-    print(f"Logged {status} for code {code_val}")
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
@@ -152,6 +127,7 @@ def signup():
     existing = get_airtable_data("Signups")
     data = {"fields": {"First": session['user']['first'], "Last": session['user']['last'], "Player Code": str(session['user']['code']), "Status": "Confirmed" if len(existing) < 24 else "Waitlist"}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=data)
+    log_activity(f"{session['user']['first']} {session['user']['last']}", "Signed Up")
     return redirect(url_for('index'))
 
 @app.route('/cancel', methods=['POST'])
@@ -165,6 +141,7 @@ def cancel():
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{promo['id']}", headers=HEADERS, json={"fields": {"Status": "Confirmed"}})
             send_email(promo['fields'].get('Email'), "🎾 You're IN!", "A spot opened up. You are confirmed!")
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS)
+        log_activity(f"{session['user']['first']} {session['user']['last']}", "Cancelled")
     return redirect(url_for('index'))
 
 @app.route('/logout')
