@@ -134,7 +134,7 @@
                     <h4 class="label">Injury Tracker & Attendance</h4>
                     <div class="admin-scroll">
                         <table class="table is-narrow is-fullwidth is-hoverable">
-                            <thead><tr><th>Name</th><th>Note/Injury</th><th>Strikes</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Note/Injury</th><th>Attendance</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
@@ -143,12 +143,13 @@
                                         <form action="/admin_action" method="post" class="is-flex">
                                             <input type="hidden" name="player_id" value="{{ m.id }}">
                                             <input class="input is-small" name="note" value="{{ m.fields.Notes or '' }}" placeholder="Injury info...">
-                                            <button class="button is-small is-info" name="action" value="player_update">Save</button>
+                                            <button class="button is-small is-info ml-1" name="action" value="player_update">Save</button>
                                         </form>
                                     </td>
                                     <td>
-                                        <form action="/no_show/{{ m.fields.Code }}" method="post">
-                                            <button class="button is-small is-danger is-outlined">No Show</button>
+                                        <form action="/attendance/{{ m.fields.Code }}" method="post" class="is-flex">
+                                            <button class="button is-small is-warning is-light mr-1" name="status" value="Late">Late</button>
+                                            <button class="button is-small is-danger is-outlined" name="status" value="No Show">No Show</button>
                                         </form>
                                     </td>
                                 </tr>
