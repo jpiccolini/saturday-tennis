@@ -47,6 +47,12 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None):
         return r.json().get('records', []) if r.status_code == 200 else []
     except: return []
 
+def log_activity(name, action):
+    """Logs user activity to the Logs table."""
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", 
+                  headers=HEADERS, 
+                  json={"fields": {"Name": name, "Action": action}})
+
 @app.route('/')
 def index():
     settings = get_airtable_data("Settings")
@@ -89,18 +95,28 @@ def index():
                            applicants=applicants, master_list=master_list, user_on_roster=user_on_roster, 
                            waitlist_pos=waitlist_pos, weather=weather_info)
 
+# --- UPDATE YOUR /validate ROUTE ---
 @app.route('/validate', methods=['POST'])
 def validate():
     code = str(request.form.get('code', '')).strip()
     password = request.form.get('password')
     formula = f"{{Code}}='{code}'"
     records = get_airtable_data("Master List", filter_formula=formula)
+    
     if records:
         f = records[0]['fields']
         is_admin = (password == ADMIN_PW)
+        user_name = f"{f.get('First')} {f.get('Last')}"
+        
         session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': is_admin}
+        
+        # LOG THE VISIT HERE
+        log_activity(user_name, "Login")
+        
         return redirect(url_for('index'))
-    flash("Invalid Code", "error"); return redirect(url_for('index'))
+    
+    flash("Invalid Code", "error")
+    return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
