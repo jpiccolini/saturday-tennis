@@ -12,6 +12,7 @@
         .guidelines-box { background: white; border-radius: 8px; padding: 20px; border: 1px solid #ddd; margin-top: 2rem; }
         .footer-text { font-size: 0.9rem; color: #666; text-align: center; margin-top: 2rem; padding-bottom: 2rem; }
         .admin-scroll { max-height: 450px; overflow-y: auto; border: 1px solid #eee; }
+        .log-feed { font-size: 0.75rem; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 200px; overflow-y: auto; }
     </style>
 </head>
 <body>
@@ -105,27 +106,23 @@
                 <div class="box has-text-dark">
                     <h4 class="label">Weekly Updates</h4>
                     <form action="/admin_action" method="post">
-                        <div class="field"><input class="input is-small" name="date" placeholder="Target Date (e.g. May 5)"></div>
-                        <div class="field"><input class="input is-small" name="time" placeholder="Start Time (e.g. 9:00 AM)"></div>
+                        <input class="input is-small mb-2" name="date" placeholder="Target Date">
+                        <input class="input is-small mb-2" name="time" placeholder="Start Time">
                         <button class="button is-small is-warning is-fullwidth mb-2" name="action" value="labels">Update Date/Time</button>
-                        <button class="button is-small is-danger is-fullwidth" name="action" value="reset_roster" onclick="return confirm('ERASE ENTIRE ROSTER?')">RESET ROSTER</button>
+                        <button class="button is-small is-danger is-fullwidth" name="action" value="reset_roster" onclick="return confirm('ERASE ROSTER?')">RESET ROSTER</button>
                     </form>
 
                     <hr>
-                    <h4 class="label">Pending Applicants</h4>
-                    {% if applicants %}
-                        {% for a in applicants %}
-                        <div class="level is-mobile mb-1">
-                            <div class="level-left is-size-7">{{ a.fields.First }} {{ a.fields.Last }}</div>
-                            <div class="level-right">
-                                <form action="/approve/{{ a.id }}" method="post" style="display:inline;"><button class="button is-small is-success">✔</button></form>
-                                <form action="/reject/{{ a.id }}" method="post" style="display:inline; margin-left:5px;"><button class="button is-small is-danger">✘</button></form>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <p class="is-size-7">No pending inquiries.</p>
-                    {% endif %}
+                    <h4 class="label">Recent Activity (Last 10)</h4>
+                    <div class="log-feed">
+                        {% if logs %}
+                            {% for l in logs %}
+                            <div class="mb-1"><strong>{{ l.fields.Name }}</strong>: {{ l.fields.Action }}</div>
+                            {% endfor %}
+                        {% else %}
+                            <p>No recent activity logs.</p>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
 
@@ -134,7 +131,7 @@
                     <h4 class="label">Injury Tracker & Attendance</h4>
                     
                     <div class="control mb-3">
-                        <input type="text" id="playerSearchInput" class="input is-info is-small" placeholder="🔍 Search by name..." onkeyup="filterAdminTable()">
+                        <input type="text" id="playerSearchInput" class="input is-info is-small" placeholder="🔍 Search players by name..." onkeyup="filterAdminTable()">
                     </div>
 
                     <div class="admin-scroll">
@@ -173,18 +170,15 @@
         <div class="content is-size-6">
             <ul>
                 <li><strong>Commitment:</strong> Commit only if you can be there for the entire time (2+ hours).</li>
-                <li><strong>Guests:</strong> If you add a guest, you are their guide and sub-coordinator if they bail.</li>
-                <li><strong>Automatic Waitlist:</strong> The first 24 players are confirmed. Anyone after is automatically waitlisted. If a confirmed player cancels, the app promotes the next person and emails them automatically.</li>
-                <li><strong>Cancellation:</strong> If you drop out, click "Cancel My Spot" in the app. The system handles all the name-moving for you.</li>
+                <li><strong>Automatic Waitlist:</strong> The first 24 players are confirmed. If a confirmed player cancels, the system automatically promotes and emails the next person.</li>
+                <li><strong>Cancellation:</strong> If you drop out, click "Cancel My Spot." The system handles the rest.</li>
                 <li><strong>Friday Lock-In:</strong> Once locked in on Friday, you are responsible for playing or providing a sub.</li>
-                <li><strong>Parking @ Dawson:</strong> Drive up main drag, over speed bump, bending right. Turn right onto Henderson Court. Park in the nearest lot on your left (not on dirt/grass).</li>
+                <li><strong>Parking @ Dawson:</strong> Drive up main drag, over speed bump, bending right. Turn right onto Henderson Court. Park in the nearest lot on your left.</li>
             </ul>
-            <p class="has-text-centered has-text-weight-bold">Keep bringing the spirit, it matters!</p>
         </div>
     </div>
 
     <div class="footer-text">Saturday Tennis Gang &bull; Dawson School</div>
-
 </div>
 
 <div id="apply-modal" class="modal">
@@ -206,17 +200,11 @@
         let input = document.getElementById("playerSearchInput").value.toLowerCase();
         let table = document.getElementById("adminPlayerTable");
         let rows = table.getElementsByTagName("tr");
-
-        // Loop through all table rows, and hide those who don't match the search query
-        for (let i = 1; i < rows.length; i++) { // start at 1 to skip the header row
+        for (let i = 1; i < rows.length; i++) {
             let nameCell = rows[i].getElementsByTagName("td")[0];
             if (nameCell) {
                 let nameText = nameCell.textContent || nameCell.innerText;
-                if (nameText.toLowerCase().indexOf(input) > -1) {
-                    rows[i].style.display = "";
-                } else {
-                    rows[i].style.display = "none";
-                }
+                rows[i].style.display = (nameText.toLowerCase().indexOf(input) > -1) ? "" : "none";
             }
         }
     }
