@@ -13,7 +13,7 @@
         .footer-text { font-size: 0.9rem; color: #666; text-align: center; margin-top: 2rem; padding-bottom: 2rem; }
         .admin-scroll { max-height: 500px; overflow-y: auto; border: 1px solid #eee; }
         .log-feed { font-size: 0.75rem; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 150px; overflow-y: auto; }
-        .applicant-card { background: #fff; border: 1px solid #eee; padding: 8px; border-radius: 4px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .applicant-card { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 4px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body>
@@ -23,7 +23,6 @@
         <div class="container">
             <h1 class="title has-text-white">🎾 Saturday Tennis @ Dawson</h1>
             <h2 class="subtitle has-text-light">{{ target_date }} | {{ start_time }}{{ end_time }}</h2>
-            <a href="#guidelines" class="button is-small is-light is-outlined">View Guidelines</a>
         </div>
     </div>
 </section>
@@ -37,9 +36,7 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">
-            {{ message }}
-          </div>
+          <div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message }}</div>
         {% endfor %}
       {% endif %}
     {% endwith %}
@@ -49,17 +46,11 @@
             <h4 class="label">Player Login</h4>
             <form action="/validate" method="post">
                 <div class="field has-addons">
-                    <div class="control is-expanded">
-                        <input class="input" name="code" type="password" placeholder="Enter 4-Digit Code">
-                    </div>
+                    <div class="control is-expanded"><input class="input" name="code" type="password" placeholder="Enter 4-Digit Code"></div>
                 </div>
                 <div class="field has-addons">
-                    <div class="control is-expanded">
-                        <input class="input" name="password" type="password" placeholder="Admin Password (Optional)">
-                    </div>
-                    <div class="control">
-                        <button class="button is-success">Login</button>
-                    </div>
+                    <div class="control is-expanded"><input class="input" name="password" type="password" placeholder="Admin Password (Optional)"></div>
+                    <div class="control"><button class="button is-success">Login</button></div>
                 </div>
             </form>
             <p class="is-size-7 mt-2">New player? <a href="javascript:void(0)" onclick="document.getElementById('apply-modal').classList.add('is-active')">Apply Here</a></p>
@@ -70,20 +61,13 @@
                 <div class="level-left"><p>Hi <strong>{{ session.user.first }}</strong>!</p></div>
                 <div class="level-right"><a href="/logout" class="button is-small is-danger is-light">Logout</a></div>
             </div>
-
             {% if not user_on_roster %}
                 <form action="/signup" method="post"><button class="button is-success is-fullwidth is-large">SIGN UP FOR THIS SATURDAY</button></form>
             {% else %}
                 <div class="message is-success">
                     <div class="message-body">
-                        {% if waitlist_pos > 0 %}
-                            ⚠️ You are on the <strong>Waitlist (#{{ waitlist_pos }})</strong>.
-                        {% else %}
-                            ✅ You are <strong>Confirmed</strong> for the roster!
-                        {% endif %}
-                        <form action="/cancel" method="post" class="mt-2">
-                            <button class="button is-small is-danger is-outlined" onclick="return confirm('Cancel your spot?')">Cancel My Spot</button>
-                        </form>
+                        {% if waitlist_pos > 0 %}⚠️ Waitlist (#{{ waitlist_pos }}){% else %}✅ You are Confirmed!{% endif %}
+                        <form action="/cancel" method="post" class="mt-2"><button class="button is-small is-danger is-outlined">Cancel My Spot</button></form>
                     </div>
                 </div>
             {% endif %}
@@ -99,9 +83,7 @@
                 <tr class="{{ 'has-background-warning-light' if loop.index > 24 }}">
                     <td>{{ loop.index }}</td>
                     <td>{{ p.First }} {{ p.Last }}</td>
-                    <td><span class="tag {{ 'is-success' if loop.index <= 24 else 'is-warning' }}">
-                        {{ 'Confirmed' if loop.index <= 24 else 'Waitlist' }}</span>
-                    </td>
+                    <td><span class="tag {{ 'is-success' if loop.index <= 24 else 'is-warning' }}">{{ 'Confirmed' if loop.index <= 24 else 'Waitlist' }}</span></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -110,78 +92,59 @@
 
     {% if session.user and session.user.is_admin %}
     <div class="notification is-dark mt-6">
-        <h3 class="title is-4 has-text-white">Admin: Management Console</h3>
-        
+        <h3 class="title is-4 has-text-white">Admin Console</h3>
         <div class="columns">
             <div class="column is-one-third">
                 <div class="box has-text-dark">
                     <h4 class="label">Weekly Updates</h4>
                     <form action="/admin_action" method="post">
-                        <input class="input is-small mb-2" name="date" placeholder="Target Date">
-                        <input class="input is-small mb-2" name="time" placeholder="Start Time">
-                        <button class="button is-small is-warning is-fullwidth mb-2" name="action" value="labels">Update Date/Time</button>
-                        <button class="button is-small is-danger is-fullwidth mb-2" name="action" value="reset_roster" onclick="return confirm('ERASE ROSTER?')">RESET ROSTER</button>
+                        <input class="input is-small mb-2" name="date" placeholder="Date">
+                        <input class="input is-small mb-2" name="time" placeholder="Time">
+                        <button class="button is-small is-warning is-fullwidth mb-2" name="action" value="labels">Update Info</button>
+                        <button class="button is-small is-danger is-fullwidth" name="action" value="reset_roster" onclick="return confirm('ERASE?')">RESET ROSTER</button>
                     </form>
-
                     <hr>
-                    <h4 class="label">Invite New Player</h4>
+                    <h4 class="label">Invite Email</h4>
                     <form action="/send_invite" method="post">
                         <div class="field has-addons">
-                            <div class="control is-expanded">
-                                <input class="input is-small" name="invite_email" type="email" placeholder="Email" required>
-                            </div>
-                            <div class="control">
-                                <button class="button is-small is-info">Invite</button>
-                            </div>
+                            <div class="control is-expanded"><input class="input is-small" name="invite_email" type="email" placeholder="Email"></div>
+                            <div class="control"><button class="button is-small is-info">Invite</button></div>
                         </div>
                     </form>
-
                     <hr>
                     <h4 class="label">Pending Applicants</h4>
-                    <div style="max-height: 200px; overflow-y: auto;">
+                    <div style="max-height: 250px; overflow-y: auto;">
                         {% if applicants %}
                             {% for a in applicants %}
                             <div class="applicant-card">
                                 <p class="is-size-7"><strong>{{ a.fields.First }} {{ a.fields.Last }}</strong></p>
-                                <form action="/send_welcome/{{ a.id }}" method="post">
-                                    <button class="button is-small is-success is-fullwidth mt-1">Send Welcome Email</button>
-                                </form>
+                                <div class="buttons">
+                                    <form action="/approve_player/{{ a.id }}" method="post" class="is-fullwidth">
+                                        <button class="button is-small is-link is-fullwidth mb-1">Approve & Assign Code</button>
+                                    </form>
+                                    <form action="/send_welcome/{{ a.id }}" method="post" class="is-fullwidth">
+                                        <button class="button is-small is-success is-fullwidth">Email Code</button>
+                                    </form>
+                                </div>
                             </div>
                             {% endfor %}
                         {% else %}
                             <p class="is-size-7">No pending inquiries.</p>
                         {% endif %}
                     </div>
-
-                    <hr>
-                    <h4 class="label">Activity Log</h4>
-                    <div class="log-feed">
-                        {% if logs %}
-                            {% for l in logs %}
-                            <div class="mb-1"><strong>{{ l.fields.Name }}</strong>: {{ l.fields.Action }}</div>
-                            {% endfor %}
-                        {% else %}
-                            <p>No activity logs.</p>
-                        {% endif %}
-                    </div>
                 </div>
             </div>
-
             <div class="column">
                 <div class="box has-text-dark">
-                    <h4 class="label">Injury Tracker & Attendance</h4>
-                    
-                    <div class="control mb-3">
-                        <input type="text" id="playerSearchInput" class="input is-info is-small" placeholder="🔍 Search players..." onkeyup="filterAdminTable()">
-                    </div>
-
+                    <h4 class="label">Injury & Attendance</h4>
+                    <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search..." onkeyup="filterAdminTable()">
                     <div class="admin-scroll">
-                        <table class="table is-narrow is-fullwidth is-hoverable" id="adminPlayerTable">
-                            <thead><tr><th>Name</th><th>Note/Injury</th><th>Status</th></tr></thead>
+                        <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
+                            <thead><tr><th>Name</th><th>Injury/Note</th><th>Attendance</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
-                                    <td class="is-size-7 has-text-weight-bold">{{ m.fields.First }} {{ m.fields.Last }}</td>
+                                    <td class="is-size-7"><b>{{ m.fields.First }} {{ m.fields.Last }}</b></td>
                                     <td>
                                         <form action="/admin_action" method="post" class="is-flex">
                                             <input type="hidden" name="player_id" value="{{ m.id }}">
@@ -205,20 +168,6 @@
         </div>
     </div>
     {% endif %}
-
-    <div id="guidelines" class="guidelines-box">
-        <h3 class="title is-4">Gang Guidelines</h3>
-        <div class="content is-size-6">
-            <ul>
-                <li><strong>Commitment:</strong> Commit only if you can be there for the entire time (2+ hours).</li>
-                <li><strong>Waitlist:</strong> The first 24 players are confirmed. Automated email goes out if a spot opens up.</li>
-                <li><strong>Cancellation:</strong> If you drop out, click "Cancel My Spot."</li>
-                <li><strong>Parking @ Dawson:</strong> Drive up main drag, turn right on Henderson Court. Park in the nearest lot on the left.</li>
-            </ul>
-        </div>
-    </div>
-
-    <div class="footer-text">Saturday Tennis Gang &bull; Dawson School</div>
 </div>
 
 <div id="apply-modal" class="modal">
@@ -229,7 +178,7 @@
             <input class="input mb-2" name="first" placeholder="First Name" required>
             <input class="input mb-2" name="last" placeholder="Last Name" required>
             <input class="input mb-2" name="email" type="email" placeholder="Email" required>
-            <input class="input mb-2" name="note" placeholder="Tell us about your game!">
+            <input class="input mb-2" name="note" placeholder="Note">
             <button class="button is-success is-fullwidth">Submit Application</button>
         </form>
     </div></div>
@@ -249,6 +198,5 @@
         }
     }
 </script>
-
 </body>
 </html>
