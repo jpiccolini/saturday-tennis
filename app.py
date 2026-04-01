@@ -1,4 +1,4 @@
-import os, requests
+import os, requests, random
 from flask import Flask, render_template, request, session, redirect, url_for, flash
 from datetime import datetime, timedelta
 from sendgrid import SendGridAPIClient
@@ -13,7 +13,7 @@ ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY")
 SG_KEY = os.environ.get("SENDGRID_API_KEY")
 FROM_EMAIL = os.environ.get("FROM_EMAIL")
-SITE_URL = "https://saturday-tennis.onrender.com" # Update if different
+SITE_URL = "https://saturday-tennis.onrender.com"
 
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
@@ -94,37 +94,44 @@ def index():
 def send_invite():
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     email = request.form.get('invite_email')
-    subject = "🎾 Invitation to join the Saturday Tennis Gang"
-    body = f"Hi! You've been invited to join the Saturday Tennis Gang. Please apply here: {SITE_URL}"
+    subject = "🎾 Invitation: Saturday Tennis Gang"
+    body = f"""<h3>You're invited!</h3>
+    <p>Apply to join our Saturday tennis rotation here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
+    <p><b>Note:</b> Our emails often land in SPAM. Please check your spam folder and mark us as 'Not Spam'!</p>"""
     send_email(email, subject, body)
     flash(f"Invite sent to {email}", "success")
+    return redirect(url_for('index'))
+
+@app.route('/approve_player/<app_id>', methods=['POST'])
+def approve_player(app_id):
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
+    f = res.get('fields', {})
+    new_code = str(random.randint(1000, 9999))
+    master_data = {"fields": {"First": f.get('First'), "Last": f.get('Last'), "Email": f.get('Email'), "Code": new_code, "Notes": f.get('Notes', '')}}
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
+    flash(f"Approved {f.get('First')}! Code: {new_code}", "success")
     return redirect(url_for('index'))
 
 @app.route('/send_welcome/<app_id>', methods=['POST'])
 def send_welcome(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    # Fetch applicant to get name/email
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
     email, first = f.get('Email'), f.get('First')
-    
-    # Check Master List for their code
     m_recs = get_airtable_data("Master List", filter_formula=f"AND({{First}}='{first}', {{Last}}='{f.get('Last')}')")
     code = m_recs[0]['fields'].get('Code', 'TBD') if m_recs else "TBD"
-
-    subject = "🎾 You're In! Welcome to the Saturday Tennis Gang"
+    subject = "🎾 Welcome to the Gang!"
     content = f"""<h3>Hi {first}!</h3>
-    <p>Your application is approved. Here is how to join us:</p>
-    <ul>
-        <li><b>Site:</b> <a href='{SITE_URL}'>{SITE_URL}</a></li>
-        <li><b>Your Login Code:</b> {code}</li>
-    </ul>
-    <p>Log in, click sign up, and we'll see you on the courts!</p>"""
-    
+    <p>Your login code is: <b>{code}</b></p>
+    <p>Site: <a href='{SITE_URL}'>{SITE_URL}</a></p>
+    <p><b>SPAM WARNING:</b> Please add {FROM_EMAIL} to your contacts so you don't miss roster updates!</p>"""
     send_email(email, subject, content)
     flash(f"Welcome email sent to {first}!", "success")
     return redirect(url_for('index'))
 
+# --- REMAINDER OF ROUTES (validate, signup, cancel, logout, etc.) STAY THE SAME ---
 @app.route('/validate', methods=['POST'])
 def validate():
     code = str(request.form.get('code', '')).strip()
