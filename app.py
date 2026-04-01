@@ -13,13 +13,21 @@ ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY")
 SG_KEY = os.environ.get("SENDGRID_API_KEY")
 FROM_EMAIL = os.environ.get("FROM_EMAIL")
+SITE_URL = "https://saturday-tennis.onrender.com" # Update if different
 
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 def log_activity(name, action):
-    """Saves visit to Logs table in Airtable."""
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
                   json={"fields": {"Name": name, "Action": action}})
+
+def send_email(to_email, subject, html_content):
+    if not SG_KEY or not FROM_EMAIL: return
+    message = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html_content)
+    try:
+        sg = SendGridAPIClient(SG_KEY)
+        sg.send(message)
+    except Exception as e: print(f"Email Error: {e}")
 
 def get_airtable_data(table_name, filter_formula=None, sort_field=None, max_records=None, direction="asc"):
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
@@ -29,13 +37,11 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None, max_reco
         params['filterByFormula'] = f"AND({base_formula}, {filter_formula})" if filter_formula else base_formula
     elif filter_formula:
         params['filterByFormula'] = filter_formula
-        
     if sort_field:
         params['sort[0][field]'] = sort_field
         params['sort[0][direction]'] = direction
     if max_records:
         params['maxRecords'] = max_records
-    
     try:
         r = requests.get(url, headers=HEADERS, params=params)
         return r.json().get('records', []) if r.status_code == 200 else []
@@ -78,12 +84,46 @@ def index():
     if curr_user and curr_user.get('is_admin'):
         applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
         master_list = get_airtable_data("Master List", sort_field="First")
-        # GET LAST 10 LOGS (Sorted by newest first)
         recent_logs = get_airtable_data("Logs", sort_field="Timestamp", direction="desc", max_records=10)
 
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, master_list=master_list, logs=recent_logs,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
+
+@app.route('/send_invite', methods=['POST'])
+def send_invite():
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    email = request.form.get('invite_email')
+    subject = "🎾 Invitation to join the Saturday Tennis Gang"
+    body = f"Hi! You've been invited to join the Saturday Tennis Gang. Please apply here: {SITE_URL}"
+    send_email(email, subject, body)
+    flash(f"Invite sent to {email}", "success")
+    return redirect(url_for('index'))
+
+@app.route('/send_welcome/<app_id>', methods=['POST'])
+def send_welcome(app_id):
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    # Fetch applicant to get name/email
+    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
+    f = res.get('fields', {})
+    email, first = f.get('Email'), f.get('First')
+    
+    # Check Master List for their code
+    m_recs = get_airtable_data("Master List", filter_formula=f"AND({{First}}='{first}', {{Last}}='{f.get('Last')}')")
+    code = m_recs[0]['fields'].get('Code', 'TBD') if m_recs else "TBD"
+
+    subject = "🎾 You're In! Welcome to the Saturday Tennis Gang"
+    content = f"""<h3>Hi {first}!</h3>
+    <p>Your application is approved. Here is how to join us:</p>
+    <ul>
+        <li><b>Site:</b> <a href='{SITE_URL}'>{SITE_URL}</a></li>
+        <li><b>Your Login Code:</b> {code}</li>
+    </ul>
+    <p>Log in, click sign up, and we'll see you on the courts!</p>"""
+    
+    send_email(email, subject, content)
+    flash(f"Welcome email sent to {first}!", "success")
+    return redirect(url_for('index'))
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -146,5 +186,12 @@ def cancel():
 
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('index'))
+
+@app.route('/apply', methods=['POST'])
+def apply():
+    data = {"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Notes": request.form.get('note'), "Status": "Pending"}}
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=data)
+    flash("Application Submitted!", "success")
+    return redirect(url_for('index'))
 
 if __name__ == '__main__': app.run(debug=True)
