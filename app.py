@@ -29,6 +29,7 @@ def index():
         d_date = f.get('Target Date', 'TBD')
         d_start = f.get('Start Time', 'TBD')
         try:
+            # Parses "8:45 AM" and adds 2h 15m
             start_dt = datetime.strptime(d_start, "%I:%M %p")
             end_dt = start_dt + timedelta(hours=2, minutes=15)
             d_end = f" – {end_dt.strftime('%I:%M %p').lstrip('0')}"
@@ -55,7 +56,7 @@ def index():
         sat = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
         if sat:
             t8, t11 = int(sat['hour'][8]['temp_f']), int(sat['hour'][11]['temp_f'])
-            weather_info = f"Sat Forecast: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
+            weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
     # 4. Master List & Strikes
@@ -112,13 +113,11 @@ def cancel():
 def admin_action():
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     action = request.form.get('action')
-    
     if action == 'labels':
         recs = get_airtable_data("Settings")
         if recs:
             payload = {"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}}
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{recs[0]['id']}", headers=HEADERS, json=payload)
-    
     elif action == 'strike':
         code = request.form.get('player_code')
         master = get_airtable_data("Master List")
@@ -128,13 +127,11 @@ def admin_action():
                                "Attendance": "No Show", "Date": datetime.now().strftime("%Y-%m-%d")}}
             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=payload)
             flash(f"Strike recorded for {p.get('First')}.", "success")
-
     elif action == 'reset_roster':
         recs = get_airtable_data("Signups")
         for r in recs:
             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-        flash("Roster cleared successfully.", "success")
-
+        flash("Roster cleared.", "success")
     return redirect(url_for('index'))
 
 @app.route('/logout')
