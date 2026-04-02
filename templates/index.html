@@ -12,6 +12,8 @@
         .admin-scroll { max-height: 500px; overflow-y: auto; border: 1px solid #eee; }
         .log-feed { font-size: 0.75rem; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 150px; overflow-y: auto; }
         .applicant-card { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 4px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .guidelines-box { background-color: #fff9e6; border-left: 4px solid #ffdd57; padding: 20px; font-size: 0.9rem; }
+        .guidelines-box li { margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -31,7 +33,7 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message }}</div>
+          <div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message | safe }}</div>
         {% endfor %}
       {% endif %}
     {% endwith %}
@@ -51,128 +53,160 @@
             <p class="is-size-7 mt-2">New player? <a href="javascript:void(0)" onclick="document.getElementById('apply-modal').classList.add('is-active')">Apply Here</a></p>
         </div>
     {% else %}
-        <div class="notification is-light">
-            <div class="level is-mobile">
-                <div class="level-left">
-                    <p>Hi <strong>{{ session.user.first }}</strong>!</p>
-                    <button class="button is-small is-info is-light ml-3" onclick="document.getElementById('profile-modal').classList.add('is-active')">Update Contact Info</button>
-                </div>
-                <div class="level-right"><a href="/logout" class="button is-small is-danger is-light">Logout</a></div>
-            </div>
-            {% if not user_on_roster %}
-                <form action="/signup" method="post"><button class="button is-success is-fullwidth is-large">SIGN UP FOR THIS SATURDAY</button></form>
-            {% else %}
-                <div class="message is-success">
-                    <div class="message-body">
-                        {% if waitlist_pos > 0 %}⚠️ Waitlist (#{{ waitlist_pos }}){% else %}✅ You are Confirmed!{% endif %}
-                        <form action="/cancel" method="post" class="mt-2"><button class="button is-small is-danger is-outlined">Cancel My Spot</button></form>
-                    </div>
-                </div>
-            {% endif %}
-        </div>
-    {% endif %}
-
-    <div class="box">
-        <h3 class="title is-4">The Roster</h3>
-        <table class="table is-fullwidth is-striped">
-            <thead><tr><th>#</th><th>Player</th><th>Status</th></tr></thead>
-            <tbody>
-                {% for p in roster %}
-                <tr class="{{ 'has-background-warning-light' if loop.index > 24 }}">
-                    <td>{{ loop.index }}</td>
-                    <td>{{ p.First }} {{ p.Last }}</td>
-                    <td><span class="tag {{ 'is-success' if loop.index <= 24 else 'is-warning' }}">{{ 'Confirmed' if loop.index <= 24 else 'Waitlist' }}</span></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    {% if session.user and session.user.is_admin %}
-    <div class="notification is-dark mt-6">
-        <h3 class="title is-4 has-text-white">Admin Console</h3>
         <div class="columns">
-            <div class="column is-one-third">
-                <div class="box has-text-dark">
-                    <h4 class="label">Weekly Updates</h4>
-                    <form action="/admin_action" method="post">
-                        <input class="input is-small mb-2" name="date" placeholder="Date">
-                        <input class="input is-small mb-2" name="time" placeholder="Time">
-                        <button class="button is-small is-warning is-fullwidth mb-2" name="action" value="labels">Update Info</button>
-                        <button class="button is-small is-danger is-fullwidth" name="action" value="reset_roster" onclick="return confirm('ERASE?')">RESET ROSTER</button>
-                    </form>
-                    <hr>
-                    <h4 class="label">Invite New Player</h4>
-                    <form action="/send_invite" method="post">
-                        <div class="field has-addons">
-                            <div class="control is-expanded"><input class="input is-small" name="invite_email" type="email" placeholder="Email"></div>
-                            <div class="control"><button class="button is-small is-info">Invite</button></div>
+            
+            <div class="column is-two-thirds">
+                
+                <div class="notification is-light">
+                    <div class="level is-mobile">
+                        <div class="level-left">
+                            <p>Hi <strong>{{ session.user.first }}</strong>!</p>
+                            <button class="button is-small is-info is-light ml-3" onclick="document.getElementById('profile-modal').classList.add('is-active')">Update Contact Info</button>
                         </div>
-                    </form>
-                    <hr>
-                    <h4 class="label">Pending Applicants</h4>
-                    <div style="max-height: 250px; overflow-y: auto;">
-                        {% if applicants %}
-                            {% for a in applicants %}
-                            <div class="applicant-card">
-                                <p class="is-size-7"><strong>{{ a.fields.First }} {{ a.fields.Last }}</strong></p>
-                                <form action="/approve_player/{{ a.id }}" method="post">
-                                    <button class="button is-small is-link is-fullwidth">Approve & Email Code</button>
-                                </form>
+                        <div class="level-right"><a href="/logout" class="button is-small is-danger is-light">Logout</a></div>
+                    </div>
+                    {% if not user_on_roster %}
+                        <form action="/signup" method="post"><button class="button is-success is-fullwidth is-large">SIGN UP FOR THIS SATURDAY</button></form>
+                    {% else %}
+                        <div class="message is-success">
+                            <div class="message-body">
+                                {% if waitlist_pos > 0 %}⚠️ Waitlist (#{{ waitlist_pos }}){% else %}✅ You are Confirmed!{% endif %}
+                                <form action="/cancel" method="post" class="mt-2"><button class="button is-small is-danger is-outlined">Cancel My Spot</button></form>
                             </div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="box">
+                    <h3 class="title is-4">The Roster</h3>
+                    <table class="table is-fullwidth is-striped">
+                        <thead><tr><th>#</th><th>Player</th><th>Status</th></tr></thead>
+                        <tbody>
+                            {% for p in roster %}
+                            <tr class="{{ 'has-background-warning-light' if loop.index > 24 }}">
+                                <td>{{ loop.index }}</td>
+                                <td>{{ p.First }} {{ p.Last }}</td>
+                                <td><span class="tag {{ 'is-success' if loop.index <= 24 else 'is-warning' }}">{{ 'Confirmed' if loop.index <= 24 else 'Waitlist' }}</span></td>
+                            </tr>
                             {% endfor %}
-                        {% else %}
-                            <p class="is-size-7">No pending inquiries.</p>
-                        {% endif %}
-                    </div>
-                    <hr>
-                    <h4 class="label">Recent Activity</h4>
-                    <div class="log-feed">
-                        {% for log in logs %}
-                            <p><b>{{ log.fields.Name }}</b> <span class="has-text-grey">{{ log.fields.Action }}</span></p>
-                        {% else %}
-                            <p class="is-size-7">No recent activity.</p>
-                        {% endfor %}
-                    </div>
+                        </tbody>
+                    </table>
                 </div>
             </div>
-            <div class="column">
-                <div class="box has-text-dark">
-                    <h4 class="label">Master List (Searchable)</h4>
-                    <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search by name or code..." onkeyup="filterAdminTable()">
-                    <div class="admin-scroll">
-                        <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
-                            <thead><tr><th>Name</th><th>Code / Phone</th><th>Notes</th><th>Attend</th></tr></thead>
-                            <tbody>
-                                {% for m in master_list %}
-                                <tr>
-                                    <td class="is-size-7"><b>{{ m.fields.First }} {{ m.fields.Last }}</b></td>
-                                    <td class="is-size-7">
-                                        <span class="tag is-info is-light"><b>{{ m.fields.Code }}</b></span><br>
-                                        <span class="has-text-grey">{{ m.fields.Phone or 'No Phone' }}</span>
-                                    </td>
-                                    <td>
-                                        <form action="/admin_action" method="post" class="is-flex">
-                                            <input type="hidden" name="player_id" value="{{ m.id }}">
-                                            <input class="input is-small" name="note" value="{{ m.fields.Notes or '' }}">
-                                            <button class="button is-small is-info ml-1" name="action" value="player_update">Save</button>
-                                        </form>
-                                    </td>
-                                    <td>
-                                        <form action="/attendance/{{ m.fields.Code }}" method="post" class="is-flex">
-                                            <button class="button is-small is-warning is-light mr-1" name="status" value="Late">L</button>
-                                            <button class="button is-small is-danger is-outlined" name="status" value="No Show">X</button>
-                                        </form>
-                                    </td>
-                                </tr>
+
+            <div class="column is-one-third">
+                
+                {% if show_emergency_btn %}
+                <form action="/emergency_sub" method="post" onsubmit="return confirm('This will email ALL players that a sub is urgently needed. Are you sure?');">
+                    <button class="button is-danger is-light is-fullwidth mb-4">🚨 Broadcast Emergency Sub Need</button>
+                </form>
+                {% endif %}
+
+                <button class="button is-info is-fullwidth mb-4" onclick="openDirectory()">📖 View Player Directory</button>
+
+                <div class="box guidelines-box content">
+                    <h4 class="title is-5 mb-2">Saturday Guidelines</h4>
+                    <ul class="pl-3 mt-0">
+                        <li>I will send the weekly message <strong>only</strong> to people listed in the contact list with full contact info (<a href="javascript:void(0)" onclick="document.getElementById('profile-modal').classList.add('is-active')">update here</a>).</li>
+                        <li>If you can't check the sheet on Saturday morning, <strong>don't sign up</strong>.</li>
+                        <li>If you sign up, <strong>don't be late</strong>.</li>
+                        <li>If you have an issue arise, <strong>communicate</strong> so we can adjust. Text my cell number: <strong>720-470-0214</strong> and/or press the Emergency Sub button (only available on Saturday) ASAP.</li>
+                        <li>If you are on the waitlist, <strong>check your email</strong> that morning.</li>
+                        <li>Avoid missing messages by adding <strong>jpiccolini@dawsonschool.org</strong> to your contacts and checking SPAM occasionally, to flag messages back to the inbox if needed.</li>
+                    </ul>
+                    <p class="is-size-7 mt-3">I'll remove people who don't follow the guidelines, not to be mean, rather so that you all know that you will get to play if you sign up.</p>
+                    <hr class="my-3">
+                    <p class="is-size-7"><strong>Need help?</strong> Check further below in this message. Text me for support if something isn't working.</p>
+                </div>
+            </div>
+        </div>
+
+        {% if session.user.is_admin %}
+        <div class="notification is-dark mt-6">
+            <h3 class="title is-4 has-text-white">Admin Console</h3>
+            <div class="columns">
+                <div class="column is-one-third">
+                    <div class="box has-text-dark">
+                        <h4 class="label">Weekly Updates</h4>
+                        <form action="/admin_action" method="post">
+                            <input class="input is-small mb-2" name="date" placeholder="Date">
+                            <input class="input is-small mb-2" name="time" placeholder="Time">
+                            <button class="button is-small is-warning is-fullwidth mb-2" name="action" value="labels">Update Info</button>
+                            <button class="button is-small is-danger is-fullwidth" name="action" value="reset_roster" onclick="return confirm('ERASE?')">RESET ROSTER</button>
+                        </form>
+                        <hr>
+                        <h4 class="label">Invite New Player</h4>
+                        <form action="/send_invite" method="post">
+                            <div class="field has-addons">
+                                <div class="control is-expanded"><input class="input is-small" name="invite_email" type="email" placeholder="Email"></div>
+                                <div class="control"><button class="button is-small is-info">Invite</button></div>
+                            </div>
+                        </form>
+                        <hr>
+                        <h4 class="label">Pending Applicants</h4>
+                        <div style="max-height: 250px; overflow-y: auto;">
+                            {% if applicants %}
+                                {% for a in applicants %}
+                                <div class="applicant-card">
+                                    <p class="is-size-7"><strong>{{ a.fields.First }} {{ a.fields.Last }}</strong></p>
+                                    <form action="/approve_player/{{ a.id }}" method="post">
+                                        <button class="button is-small is-link is-fullwidth">Approve & Email Code</button>
+                                    </form>
+                                </div>
                                 {% endfor %}
-                            </tbody>
-                        </table>
+                            {% else %}
+                                <p class="is-size-7">No pending inquiries.</p>
+                            {% endif %}
+                        </div>
+                        <hr>
+                        <h4 class="label">Recent Activity</h4>
+                        <div class="log-feed">
+                            {% for log in logs %}
+                                <p><b>{{ log.fields.Name }}</b> <span class="has-text-grey">{{ log.fields.Action }}</span></p>
+                            {% else %}
+                                <p class="is-size-7">No recent activity.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="box has-text-dark">
+                        <h4 class="label">Master List (Admin View)</h4>
+                        <input type="text" id="adminSearchInput" class="input is-info is-small mb-3" placeholder="Search by name or code..." onkeyup="filterAdminTable()">
+                        <div class="admin-scroll">
+                            <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
+                                <thead><tr><th>Name</th><th>Code / Phone</th><th>Notes</th><th>Attend</th></tr></thead>
+                                <tbody>
+                                    {% for m in master_list %}
+                                    <tr>
+                                        <td class="is-size-7"><b>{{ m.fields.First }} {{ m.fields.Last }}</b></td>
+                                        <td class="is-size-7">
+                                            <span class="tag is-info is-light"><b>{{ m.fields.Code }}</b></span><br>
+                                            <span class="has-text-grey">{{ m.fields.Phone or 'No Phone' }}</span>
+                                        </td>
+                                        <td>
+                                            <form action="/admin_action" method="post" class="is-flex">
+                                                <input type="hidden" name="player_id" value="{{ m.id }}">
+                                                <input class="input is-small" name="note" value="{{ m.fields.Notes or '' }}">
+                                                <button class="button is-small is-info ml-1" name="action" value="player_update">Save</button>
+                                            </form>
+                                        </td>
+                                        <td>
+                                            <form action="/attendance/{{ m.fields.Code }}" method="post" class="is-flex">
+                                                <button class="button is-small is-warning is-light mr-1" name="status" value="Late">L</button>
+                                                <button class="button is-small is-danger is-outlined" name="status" value="No Show">X</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+        {% endif %}
     {% endif %}
 </div>
 
@@ -207,15 +241,98 @@
     </div></div>
 </div>
 
+<div id="directory-modal" class="modal">
+    <div class="modal-background" onclick="closeDirectory()"></div>
+    <div class="modal-content">
+        <div class="box">
+            <h3 class="title is-4">Player Directory</h3>
+            <input type="text" id="dirSearch" class="input mb-3" placeholder="Search name..." onkeyup="searchDirectory()">
+            <table class="table is-fullwidth is-striped is-hoverable">
+                <thead><tr><th>Name</th><th>Phone Number</th></tr></thead>
+                <tbody id="dirTableBody">
+                    </tbody>
+            </table>
+            <div class="level is-mobile mt-3">
+                <div class="level-left">
+                    <button class="button is-small" id="prevBtn" onclick="changePage(-1)">Previous</button>
+                </div>
+                <div class="level-item">
+                    <span id="pageInfo" class="is-size-7"></span>
+                </div>
+                <div class="level-right">
+                    <button class="button is-small" id="nextBtn" onclick="changePage(1)">Next</button>
+                </div>
+            </div>
+            <button class="button is-light is-fullwidth mt-4" onclick="closeDirectory()">Close Directory</button>
+        </div>
+    </div>
+</div>
+
 <script>
+    // Search filter for the Admin view
     function filterAdminTable() {
-        let input = document.getElementById("playerSearchInput").value.toLowerCase();
+        let input = document.getElementById("adminSearchInput").value.toLowerCase();
         let table = document.getElementById("adminPlayerTable");
         let rows = table.getElementsByTagName("tr");
         for (let i = 1; i < rows.length; i++) {
             let rowText = rows[i].textContent.toLowerCase();
             rows[i].style.display = (rowText.indexOf(input) > -1) ? "" : "none";
         }
+    }
+
+    // Paginated Directory Logic
+    let allPlayers = [
+        {% if master_list %}
+            {% for m in master_list %}
+            { name: "{{ m.fields.First | replace('\"', '\\\"') }} {{ m.fields.Last | replace('\"', '\\\"') }}", phone: "{{ m.fields.Phone or 'No Phone' }}" },
+            {% endfor %}
+        {% endif %}
+    ];
+    let filteredPlayers = [...allPlayers];
+    let currentPage = 1;
+    const itemsPerPage = 10;
+
+    function openDirectory() {
+        document.getElementById('directory-modal').classList.add('is-active');
+        renderDirectory();
+    }
+
+    function closeDirectory() {
+        document.getElementById('directory-modal').classList.remove('is-active');
+    }
+
+    function searchDirectory() {
+        const query = document.getElementById('dirSearch').value.toLowerCase();
+        filteredPlayers = allPlayers.filter(p => p.name.toLowerCase().includes(query));
+        currentPage = 1; // Reset to page 1 on new search
+        renderDirectory();
+    }
+
+    function renderDirectory() {
+        const tbody = document.getElementById('dirTableBody');
+        tbody.innerHTML = '';
+        
+        const start = (currentPage - 1) * itemsPerPage;
+        const end = start + itemsPerPage;
+        const pageData = filteredPlayers.slice(start, end);
+
+        pageData.forEach(p => {
+            // Using a clean string literal to avoid quotes breaking the HTML
+            let tr = document.createElement('tr');
+            tr.innerHTML = `<td><b>${p.name}</b></td><td><a href="tel:${p.phone}">${p.phone}</a></td>`;
+            tbody.appendChild(tr);
+        });
+
+        const totalPages = Math.ceil(filteredPlayers.length / itemsPerPage) || 1;
+        document.getElementById('pageInfo').innerText = `Page ${currentPage} of ${totalPages}`;
+        
+        document.getElementById('prevBtn').disabled = currentPage === 1;
+        document.getElementById('nextBtn').disabled = currentPage === totalPages;
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        renderDirectory();
     }
 </script>
 
