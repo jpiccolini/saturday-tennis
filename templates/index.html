@@ -53,7 +53,10 @@
     {% else %}
         <div class="notification is-light">
             <div class="level is-mobile">
-                <div class="level-left"><p>Hi <strong>{{ session.user.first }}</strong>!</p></div>
+                <div class="level-left">
+                    <p>Hi <strong>{{ session.user.first }}</strong>!</p>
+                    <button class="button is-small is-info is-light ml-3" onclick="document.getElementById('profile-modal').classList.add('is-active')">Update Contact Info</button>
+                </div>
                 <div class="level-right"><a href="/logout" class="button is-small is-danger is-light">Logout</a></div>
             </div>
             {% if not user_on_roster %}
@@ -139,12 +142,15 @@
                     <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search by name or code..." onkeyup="filterAdminTable()">
                     <div class="admin-scroll">
                         <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
-                            <thead><tr><th>Name</th><th>Code</th><th>Notes</th><th>Attend</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Code / Phone</th><th>Notes</th><th>Attend</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
                                     <td class="is-size-7"><b>{{ m.fields.First }} {{ m.fields.Last }}</b></td>
-                                    <td class="is-size-7"><span class="tag is-info is-light"><b>{{ m.fields.Code }}</b></span></td>
+                                    <td class="is-size-7">
+                                        <span class="tag is-info is-light"><b>{{ m.fields.Code }}</b></span><br>
+                                        <span class="has-text-grey">{{ m.fields.Phone or 'No Phone' }}</span>
+                                    </td>
                                     <td>
                                         <form action="/admin_action" method="post" class="is-flex">
                                             <input type="hidden" name="player_id" value="{{ m.id }}">
@@ -178,8 +184,25 @@
             <input class="input mb-2" name="first" placeholder="First Name" required>
             <input class="input mb-2" name="last" placeholder="Last Name" required>
             <input class="input mb-2" name="email" type="email" placeholder="Email" required>
+            <input class="input mb-2" name="phone" type="tel" placeholder="Phone Number" required>
             <input class="input mb-2" name="note" placeholder="Tell us about your game!">
             <button class="button is-success is-fullwidth">Submit Application</button>
+        </form>
+    </div></div>
+</div>
+
+<div id="profile-modal" class="modal">
+    <div class="modal-background" onclick="this.parentElement.classList.remove('is-active')"></div>
+    <div class="modal-content"><div class="box">
+        <h3 class="title is-4">Update Contact Info</h3>
+        <form action="/update_profile" method="post">
+            <label class="label is-small">Email Address</label>
+            <input class="input mb-3" name="email" type="email" value="{{ session.user.email if session.user else '' }}" required>
+            
+            <label class="label is-small">Phone Number</label>
+            <input class="input mb-4" name="phone" type="tel" value="{{ session.user.phone if session.user else '' }}" required>
+            
+            <button class="button is-info is-fullwidth">Save Changes</button>
         </form>
     </div></div>
 </div>
