@@ -122,6 +122,15 @@
                             <p class="is-size-7">No pending inquiries.</p>
                         {% endif %}
                     </div>
+                    <hr>
+                    <h4 class="label">Recent Activity</h4>
+                    <div class="log-feed">
+                        {% for log in logs %}
+                            <p><b>{{ log.fields.Name }}</b> <span class="has-text-grey">{{ log.fields.Action }}</span></p>
+                        {% else %}
+                            <p class="is-size-7">No recent activity.</p>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
             <div class="column">
@@ -130,7 +139,7 @@
                     <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search by name or code..." onkeyup="filterAdminTable()">
                     <div class="admin-scroll">
                         <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
-                            <thead><tr><th>Name</th><th>Code</th><th>Injury/Note</th><th>Attend</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Code</th><th>Notes</th><th>Attend</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
