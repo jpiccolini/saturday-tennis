@@ -9,7 +9,6 @@
         body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .hero { background: linear-gradient(135deg, #2e7d32, #1b5e20); color: white; margin-bottom: 2rem; }
         .weather-box { background: #e8f5e9; border-radius: 8px; padding: 15px; border-left: 5px solid #2e7d32; font-size: 1.35rem; font-weight: bold; }
-        .footer-text { font-size: 0.9rem; color: #666; text-align: center; margin-top: 2rem; padding-bottom: 2rem; }
         .admin-scroll { max-height: 500px; overflow-y: auto; border: 1px solid #eee; }
         .log-feed { font-size: 0.75rem; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 150px; overflow-y: auto; }
         .applicant-card { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 4px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
@@ -31,7 +30,9 @@
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        {% for category, message in messages %}<div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message }}</div>{% endfor %}
+        {% for category, message in messages %}
+          <div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message }}</div>
+        {% endfor %}
       {% endif %}
     {% endwith %}
 
@@ -98,7 +99,7 @@
                         <button class="button is-small is-danger is-fullwidth" name="action" value="reset_roster" onclick="return confirm('ERASE?')">RESET ROSTER</button>
                     </form>
                     <hr>
-                    <h4 class="label">Invite Email</h4>
+                    <h4 class="label">Invite New Player</h4>
                     <form action="/send_invite" method="post">
                         <div class="field has-addons">
                             <div class="control is-expanded"><input class="input is-small" name="invite_email" type="email" placeholder="Email"></div>
@@ -107,13 +108,13 @@
                     </form>
                     <hr>
                     <h4 class="label">Pending Applicants</h4>
-                    <div style="max-height: 300px; overflow-y: auto;">
+                    <div style="max-height: 250px; overflow-y: auto;">
                         {% if applicants %}
                             {% for a in applicants %}
                             <div class="applicant-card">
                                 <p class="is-size-7"><strong>{{ a.fields.First }} {{ a.fields.Last }}</strong></p>
                                 <form action="/approve_player/{{ a.id }}" method="post">
-                                    <button class="button is-small is-link is-fullwidth mt-1">Approve & Email Code</button>
+                                    <button class="button is-small is-link is-fullwidth">Approve & Email Code</button>
                                 </form>
                             </div>
                             {% endfor %}
@@ -129,12 +130,12 @@
                     <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search by name or code..." onkeyup="filterAdminTable()">
                     <div class="admin-scroll">
                         <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
-                            <thead><tr><th>Name</th><th>Code</th><th>Note</th><th>Attend</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Code</th><th>Injury/Note</th><th>Attend</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
                                     <td class="is-size-7"><b>{{ m.fields.First }} {{ m.fields.Last }}</b></td>
-                                    <td class="is-size-7"><code>{{ m.fields.Code }}</code></td>
+                                    <td class="is-size-7"><span class="tag is-info is-light"><b>{{ m.fields.Code }}</b></span></td>
                                     <td>
                                         <form action="/admin_action" method="post" class="is-flex">
                                             <input type="hidden" name="player_id" value="{{ m.id }}">
@@ -168,7 +169,7 @@
             <input class="input mb-2" name="first" placeholder="First Name" required>
             <input class="input mb-2" name="last" placeholder="Last Name" required>
             <input class="input mb-2" name="email" type="email" placeholder="Email" required>
-            <input class="input mb-2" name="note" placeholder="Note">
+            <input class="input mb-2" name="note" placeholder="Tell us about your game!">
             <button class="button is-success is-fullwidth">Submit Application</button>
         </form>
     </div></div>
@@ -185,5 +186,6 @@
         }
     }
 </script>
+
 </body>
 </html>
