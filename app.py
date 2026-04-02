@@ -121,7 +121,7 @@ def approve_player(app_id):
     # 1. Fetch Applicant Data
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
-    email, first, last = f.get('Email'), f.get('First'), f.get('Last')
+    email, first, last, phone = f.get('Email'), f.get('First'), f.get('Last'), f.get('Phone', '')
     
     # 2. Generate Sequential Code
     m_list = get_airtable_data("Master List")
@@ -145,6 +145,7 @@ def approve_player(app_id):
             "First": first,
             "Last": last,
             "Email": email,
+            "Phone": phone,
             "Code": new_code,
             "Notes": f.get('Notes', '') 
         },
@@ -187,10 +188,44 @@ def validate():
     if records:
         f = records[0]['fields']
         name = f"{f.get('First')} {f.get('Last')}"
-        session['user'] = {'first': f.get('First'), 'last': f.get('Last'), 'code': code, 'is_admin': (password == ADMIN_PW)}
+        # Save additional info into session so they can update it
+        session['user'] = {
+            'id': records[0]['id'],
+            'first': f.get('First'), 
+            'last': f.get('Last'), 
+            'code': code, 
+            'is_admin': (password == ADMIN_PW),
+            'email': f.get('Email', ''),
+            'phone': f.get('Phone', '')
+        }
         log_activity(name, "Login")
         return redirect(url_for('index'))
     flash("Invalid Code", "error"); return redirect(url_for('index'))
+
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    if not session.get('user'): return redirect(url_for('index'))
+    
+    record_id = session['user'].get('id')
+    new_email = request.form.get('email')
+    new_phone = request.form.get('phone')
+    
+    # Patch the Master List directly
+    res = requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{record_id}", 
+                         headers=HEADERS, 
+                         json={"fields": {"Email": new_email, "Phone": new_phone}, "typecast": True})
+                         
+    if res.status_code == 200:
+        # Update session data so they see the change immediately
+        session['user']['email'] = new_email
+        session['user']['phone'] = new_phone
+        session.modified = True
+        flash("Contact info updated successfully!", "success")
+        log_activity(f"{session['user']['first']} {session['user']['last']}", "Updated Contact Info")
+    else:
+        flash("Failed to update profile.", "danger")
+        
+    return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
@@ -243,7 +278,14 @@ def logout(): session.clear(); return redirect(url_for('index'))
 
 @app.route('/apply', methods=['POST'])
 def apply():
-    data = {"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Notes": request.form.get('note'), "Status": "Pending"}}
+    data = {"fields": {
+        "First": request.form.get('first'), 
+        "Last": request.form.get('last'), 
+        "Email": request.form.get('email'), 
+        "Phone": request.form.get('phone'),
+        "Notes": request.form.get('note'), 
+        "Status": "Pending"
+    }}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=data)
     flash("Application Submitted!", "success")
     return redirect(url_for('index'))
