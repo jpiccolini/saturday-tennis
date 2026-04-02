@@ -1,6 +1,7 @@
 import os, requests
 from flask import Flask, render_template, request, session, redirect, url_for, flash
-from datetime import datetime, timedelta
+import datetime as dt
+from datetime import timedelta
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
@@ -14,6 +15,7 @@ ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY")
 SG_KEY = os.environ.get("SENDGRID_API_KEY")
 FROM_EMAIL = os.environ.get("FROM_EMAIL")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", FROM_EMAIL) 
 SITE_URL = "https://saturday-tennis.onrender.com"
 
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
@@ -46,7 +48,6 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None, max_reco
         
     records = []
     try:
-        # Loop to handle Airtable's 100-record pagination limit
         while True:
             r = requests.get(url, headers=HEADERS, params=params)
             if r.status_code != 200: break
@@ -67,7 +68,7 @@ def index():
         f = settings[0]['fields']
         d_date, d_start = f.get('Target Date', 'TBD'), f.get('Start Time', 'TBD')
         try:
-            start_dt = datetime.strptime(d_start, "%I:%M %p")
+            start_dt = dt.datetime.strptime(d_start, "%I:%M %p")
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
         except: pass
 
@@ -86,21 +87,88 @@ def index():
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
-        sat = next((d for d in w_res['forecast']['forecastday'] if datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
+        sat = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
         if sat:
             t8, t11 = int(sat['hour'][8]['temp_f']), int(sat['hour'][11]['temp_f'])
             weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {t8}°F → {t11}°F"
     except: pass
 
-    applicants, master_list, recent_logs = [], [], []
-    if curr_user and curr_user.get('is_admin'):
-        applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
+    applicants, recent_logs, master_list = [], [], []
+    show_emergency_btn = False
+
+    if curr_user:
         master_list = get_airtable_data("Master List", sort_field="First")
-        recent_logs = get_airtable_data("Logs", sort_field="Timestamp", direction="desc", max_records=10)
+        
+        # Check Emergency Button Logic (Admin = Always. Player = Saturday >= 6AM MT)
+        if curr_user.get('is_admin'):
+            show_emergency_btn = True
+            applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
+            recent_logs = get_airtable_data("Logs", sort_field="Timestamp", direction="desc", max_records=10)
+        else:
+            now_utc = dt.datetime.utcnow()
+            # 5 == Saturday. 12 UTC is 6 AM MDT / 5 AM MST, which is safely the morning.
+            if now_utc.weekday() == 5 and now_utc.hour >= 12:
+                show_emergency_btn = True
 
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, master_list=master_list, logs=recent_logs,
-                           user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info)
+                           user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info,
+                           show_emergency_btn=show_emergency_btn)
+
+@app.route('/validate', methods=['POST'])
+def validate():
+    code = str(request.form.get('code', '')).strip()
+    password = request.form.get('password')
+    
+    if password and password != ADMIN_PW:
+        flash("Incorrect Admin Password. <a href='/reset_admin_pw'><strong>Click here to email password reminder</strong></a>.", "danger")
+        return redirect(url_for('index'))
+        
+    records = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code}'")
+    if records:
+        f = records[0]['fields']
+        name = f"{f.get('First')} {f.get('Last')}"
+        session['user'] = {
+            'id': records[0]['id'],
+            'first': f.get('First'), 
+            'last': f.get('Last'), 
+            'code': code, 
+            'is_admin': (password == ADMIN_PW),
+            'email': f.get('Email', ''),
+            'phone': f.get('Phone', '')
+        }
+        log_activity(name, "Login")
+        return redirect(url_for('index'))
+    flash("Invalid Code", "error")
+    return redirect(url_for('index'))
+
+@app.route('/reset_admin_pw')
+def reset_admin_pw():
+    send_email(ADMIN_EMAIL, "Tennis Admin Password", f"Your admin password is: {ADMIN_PW}")
+    flash("Password reminder sent to the admin email.", "success")
+    return redirect(url_for('index'))
+
+@app.route('/emergency_sub', methods=['POST'])
+def emergency_sub():
+    if not session.get('user'): return redirect(url_for('index'))
+    
+    master_list = get_airtable_data("Master List")
+    sender_name = f"{session['user']['first']} {session['user']['last']}"
+    
+    subject = "🚨 URGENT: Tennis Sub Needed!"
+    body = f"""<h3>Emergency Sub Needed!</h3>
+    <p><b>{sender_name}</b> just broadcasted an urgent need for a sub for this Saturday's tennis rotation.</p>
+    <p>If you can play, please sign up immediately at <a href='{SITE_URL}'>{SITE_URL}</a> or log in to check the directory and text them directly.</p>
+    """
+    
+    for m in master_list:
+        email = m['fields'].get('Email')
+        if email:
+            send_email(email, subject, body)
+            
+    log_activity(sender_name, "Broadcasted Emergency Sub")
+    flash("Emergency sub broadcast sent to all players!", "success")
+    return redirect(url_for('index'))
 
 @app.route('/send_invite', methods=['POST'])
 def send_invite():
@@ -117,38 +185,23 @@ def send_invite():
 @app.route('/approve_player/<app_id>', methods=['POST'])
 def approve_player(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    
-    # 1. Fetch Applicant Data
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
     email, first, last, phone = f.get('Email'), f.get('First'), f.get('Last'), f.get('Phone', '')
     
-    # 2. Generate Sequential Code
     m_list = get_airtable_data("Master List")
-    highest_code = 1000 # Default starting point
+    highest_code = 1000
     for m in m_list:
         c = m['fields'].get('Code')
         if c:
             try:
                 num = int(str(c).strip())
-                # SAFETY CAP: Ignore outliers
-                if highest_code < num < 9000:
-                    highest_code = num
-            except ValueError:
-                pass 
-    
+                if highest_code < num < 9000: highest_code = num
+            except ValueError: pass 
     new_code = str(highest_code + 1)
     
-    # 3. Add to Master List
     master_data = {
-        "fields": {
-            "First": first,
-            "Last": last,
-            "Email": email,
-            "Phone": phone,
-            "Code": new_code,
-            "Notes": f.get('Notes', '') 
-        },
+        "fields": {"First": first, "Last": last, "Email": email, "Phone": phone, "Code": new_code, "Notes": f.get('Notes', '') },
         "typecast": True 
     }
     m_res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
@@ -158,73 +211,25 @@ def approve_player(app_id):
         flash(f"Error adding to Master List: {error_msg}", "danger")
         return redirect(url_for('index'))
 
-    # 4. Update Applicant Status & Write back assigned code
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", 
-                   headers=HEADERS, 
-                   json={
-                       "fields": {
-                           "Status": "Approved",
-                           "Assigned Code": new_code
-                       },
-                       "typecast": True
-                   })
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, 
+                   json={"fields": {"Status": "Approved", "Assigned Code": new_code}, "typecast": True})
     
-    # 5. Send Welcome Email
-    subject = "🎾 Welcome to the Gang!"
-    content = f"""<h3>Hi {first}!</h3>
-    <p>Your application is approved. Your personal login code is: <b>{new_code}</b></p>
-    <p>Sign up here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
-    <p><b>SPAM WARNING:</b> Please add {FROM_EMAIL} to your contacts so you don't miss roster updates!</p>"""
-    send_email(email, subject, content)
-    
-    flash(f"Success! {first} approved with Sequential Code {new_code}.", "success")
+    send_email(email, "🎾 Welcome to the Gang!", f"<h3>Hi {first}!</h3><p>Your application is approved. Login code: <b>{new_code}</b></p><p>Sign up here: <a href='{SITE_URL}'>{SITE_URL}</a></p>")
+    flash(f"Success! {first} approved with Code {new_code}.", "success")
     return redirect(url_for('index'))
-
-@app.route('/validate', methods=['POST'])
-def validate():
-    code = str(request.form.get('code', '')).strip()
-    password = request.form.get('password')
-    records = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code}'")
-    if records:
-        f = records[0]['fields']
-        name = f"{f.get('First')} {f.get('Last')}"
-        # Save additional info into session so they can update it
-        session['user'] = {
-            'id': records[0]['id'],
-            'first': f.get('First'), 
-            'last': f.get('Last'), 
-            'code': code, 
-            'is_admin': (password == ADMIN_PW),
-            'email': f.get('Email', ''),
-            'phone': f.get('Phone', '')
-        }
-        log_activity(name, "Login")
-        return redirect(url_for('index'))
-    flash("Invalid Code", "error"); return redirect(url_for('index'))
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
     if not session.get('user'): return redirect(url_for('index'))
-    
-    record_id = session['user'].get('id')
-    new_email = request.form.get('email')
-    new_phone = request.form.get('phone')
-    
-    # Patch the Master List directly
-    res = requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{record_id}", 
-                         headers=HEADERS, 
+    record_id, new_email, new_phone = session['user'].get('id'), request.form.get('email'), request.form.get('phone')
+    res = requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{record_id}", headers=HEADERS, 
                          json={"fields": {"Email": new_email, "Phone": new_phone}, "typecast": True})
-                         
     if res.status_code == 200:
-        # Update session data so they see the change immediately
-        session['user']['email'] = new_email
-        session['user']['phone'] = new_phone
+        session['user']['email'], session['user']['phone'] = new_email, new_phone
         session.modified = True
         flash("Contact info updated successfully!", "success")
         log_activity(f"{session['user']['first']} {session['user']['last']}", "Updated Contact Info")
-    else:
-        flash("Failed to update profile.", "danger")
-        
+    else: flash("Failed to update profile.", "danger")
     return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
@@ -247,7 +252,7 @@ def attendance(code_val):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     status = request.form.get('status')
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, 
-                  json={"fields": {"Player Code": str(code_val), "Attendance": status, "Date": datetime.now().strftime("%Y-%m-%d")}})
+                  json={"fields": {"Player Code": str(code_val), "Attendance": status, "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
     return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
@@ -278,14 +283,7 @@ def logout(): session.clear(); return redirect(url_for('index'))
 
 @app.route('/apply', methods=['POST'])
 def apply():
-    data = {"fields": {
-        "First": request.form.get('first'), 
-        "Last": request.form.get('last'), 
-        "Email": request.form.get('email'), 
-        "Phone": request.form.get('phone'),
-        "Notes": request.form.get('note'), 
-        "Status": "Pending"
-    }}
+    data = {"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Phone": request.form.get('phone'), "Notes": request.form.get('note'), "Status": "Pending"}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=data)
     flash("Application Submitted!", "success")
     return redirect(url_for('index'))
