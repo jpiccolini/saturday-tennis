@@ -1,4 +1,4 @@
-import os, requests, random
+import os, requests
 from flask import Flask, render_template, request, session, redirect, url_for, flash
 from datetime import datetime, timedelta
 from sendgrid import SendGridAPIClient
@@ -107,15 +107,27 @@ def send_invite():
 def approve_player(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     
-    # 1. Fetch data
+    # 1. Fetch Applicant Data
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
     email, first, last = f.get('Email'), f.get('First'), f.get('Last')
     
-    # 2. Assign Code
-    new_code = str(random.randint(1000, 9999))
+    # 2. Generate Sequential Code (Find highest existing code + 1)
+    m_list = get_airtable_data("Master List")
+    highest_code = 1000 # Default starting point if table is somehow empty
+    for m in m_list:
+        c = m['fields'].get('Code')
+        if c:
+            try:
+                num = int(str(c).strip())
+                if num > highest_code:
+                    highest_code = num
+            except ValueError:
+                pass # Ignore if a code somehow isn't a valid number
     
-    # 3. Create Master List Record (Note: Using 'Notes' as discussed)
+    new_code = str(highest_code + 1)
+    
+    # 3. Add to Master List
     master_data = {
         "fields": {
             "First": first,
@@ -123,7 +135,8 @@ def approve_player(app_id):
             "Email": email,
             "Code": new_code,
             "Notes": f.get('Notes', '') 
-        }
+        },
+        "typecast": True 
     }
     m_res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
     
@@ -132,10 +145,18 @@ def approve_player(app_id):
         flash(f"Error adding to Master List: {error_msg}", "danger")
         return redirect(url_for('index'))
 
-    # 4. Update Applicant Status
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
+    # 4. Update Applicant Status AND save to "Assigned Code" column
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", 
+                   headers=HEADERS, 
+                   json={
+                       "fields": {
+                           "Status": "Approved",
+                           "Assigned Code": new_code
+                       },
+                       "typecast": True
+                   })
     
-    # 5. Email Code
+    # 5. Send Welcome Email
     subject = "🎾 Welcome to the Gang!"
     content = f"""<h3>Hi {first}!</h3>
     <p>Your application is approved. Your personal login code is: <b>{new_code}</b></p>
@@ -143,7 +164,7 @@ def approve_player(app_id):
     <p><b>SPAM WARNING:</b> Please add {FROM_EMAIL} to your contacts so you don't miss roster updates!</p>"""
     send_email(email, subject, content)
     
-    flash(f"Success! {first} approved and emailed code {new_code}.", "success")
+    flash(f"Success! {first} approved with Sequential Code {new_code}.", "success")
     return redirect(url_for('index'))
 
 @app.route('/validate', methods=['POST'])
