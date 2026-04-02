@@ -9,7 +9,6 @@
         body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .hero { background: linear-gradient(135deg, #2e7d32, #1b5e20); color: white; margin-bottom: 2rem; }
         .weather-box { background: #e8f5e9; border-radius: 8px; padding: 15px; border-left: 5px solid #2e7d32; font-size: 1.35rem; font-weight: bold; }
-        .guidelines-box { background: white; border-radius: 8px; padding: 20px; border: 1px solid #ddd; margin-top: 2rem; }
         .footer-text { font-size: 0.9rem; color: #666; text-align: center; margin-top: 2rem; padding-bottom: 2rem; }
         .admin-scroll { max-height: 500px; overflow-y: auto; border: 1px solid #eee; }
         .log-feed { font-size: 0.75rem; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 150px; overflow-y: auto; }
@@ -28,16 +27,11 @@
 </section>
 
 <div class="container px-3">
-    
-    <div class="weather-box mb-5">
-        <span class="icon">⛅</span> {{ weather }}
-    </div>
+    <div class="weather-box mb-5"><span class="icon">⛅</span> {{ weather }}</div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        {% for category, message in messages %}
-          <div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message }}</div>
-        {% endfor %}
+        {% for category, message in messages %}<div class="notification is-{{ 'success' if category == 'success' else 'danger' }} is-light">{{ message }}</div>{% endfor %}
       {% endif %}
     {% endwith %}
 
@@ -113,19 +107,14 @@
                     </form>
                     <hr>
                     <h4 class="label">Pending Applicants</h4>
-                    <div style="max-height: 250px; overflow-y: auto;">
+                    <div style="max-height: 300px; overflow-y: auto;">
                         {% if applicants %}
                             {% for a in applicants %}
                             <div class="applicant-card">
                                 <p class="is-size-7"><strong>{{ a.fields.First }} {{ a.fields.Last }}</strong></p>
-                                <div class="buttons">
-                                    <form action="/approve_player/{{ a.id }}" method="post" class="is-fullwidth">
-                                        <button class="button is-small is-link is-fullwidth mb-1">Approve & Assign Code</button>
-                                    </form>
-                                    <form action="/send_welcome/{{ a.id }}" method="post" class="is-fullwidth">
-                                        <button class="button is-small is-success is-fullwidth">Email Code</button>
-                                    </form>
-                                </div>
+                                <form action="/approve_player/{{ a.id }}" method="post">
+                                    <button class="button is-small is-link is-fullwidth mt-1">Approve & Email Code</button>
+                                </form>
                             </div>
                             {% endfor %}
                         {% else %}
@@ -136,15 +125,16 @@
             </div>
             <div class="column">
                 <div class="box has-text-dark">
-                    <h4 class="label">Injury & Attendance</h4>
-                    <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search..." onkeyup="filterAdminTable()">
+                    <h4 class="label">Master List (Searchable)</h4>
+                    <input type="text" id="playerSearchInput" class="input is-info is-small mb-3" placeholder="Search by name or code..." onkeyup="filterAdminTable()">
                     <div class="admin-scroll">
                         <table class="table is-narrow is-fullwidth" id="adminPlayerTable">
-                            <thead><tr><th>Name</th><th>Injury/Note</th><th>Attendance</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Code</th><th>Note</th><th>Attend</th></tr></thead>
                             <tbody>
                                 {% for m in master_list %}
                                 <tr>
                                     <td class="is-size-7"><b>{{ m.fields.First }} {{ m.fields.Last }}</b></td>
+                                    <td class="is-size-7"><code>{{ m.fields.Code }}</code></td>
                                     <td>
                                         <form action="/admin_action" method="post" class="is-flex">
                                             <input type="hidden" name="player_id" value="{{ m.id }}">
@@ -154,8 +144,8 @@
                                     </td>
                                     <td>
                                         <form action="/attendance/{{ m.fields.Code }}" method="post" class="is-flex">
-                                            <button class="button is-small is-warning is-light mr-1" name="status" value="Late">Late</button>
-                                            <button class="button is-small is-danger is-outlined" name="status" value="No Show">No Show</button>
+                                            <button class="button is-small is-warning is-light mr-1" name="status" value="Late">L</button>
+                                            <button class="button is-small is-danger is-outlined" name="status" value="No Show">X</button>
                                         </form>
                                     </td>
                                 </tr>
@@ -190,11 +180,8 @@
         let table = document.getElementById("adminPlayerTable");
         let rows = table.getElementsByTagName("tr");
         for (let i = 1; i < rows.length; i++) {
-            let nameCell = rows[i].getElementsByTagName("td")[0];
-            if (nameCell) {
-                let nameText = nameCell.textContent || nameCell.innerText;
-                rows[i].style.display = (nameText.toLowerCase().indexOf(input) > -1) ? "" : "none";
-            }
+            let rowText = rows[i].textContent.toLowerCase();
+            rows[i].style.display = (rowText.indexOf(input) > -1) ? "" : "none";
         }
     }
 </script>
