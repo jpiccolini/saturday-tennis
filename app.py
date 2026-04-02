@@ -43,10 +43,21 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None, max_reco
         params['sort[0][direction]'] = direction
     if max_records:
         params['maxRecords'] = max_records
+        
+    records = []
     try:
-        r = requests.get(url, headers=HEADERS, params=params)
-        return r.json().get('records', []) if r.status_code == 200 else []
-    except: return []
+        # Loop to handle Airtable's 100-record pagination limit
+        while True:
+            r = requests.get(url, headers=HEADERS, params=params)
+            if r.status_code != 200: break
+            data = r.json()
+            records.extend(data.get('records', []))
+            if 'offset' in data and not max_records:
+                params['offset'] = data['offset']
+            else:
+                break
+        return records
+    except: return records
 
 @app.route('/')
 def index():
@@ -112,18 +123,19 @@ def approve_player(app_id):
     f = res.get('fields', {})
     email, first, last = f.get('Email'), f.get('First'), f.get('Last')
     
-    # 2. Generate Sequential Code (Find highest existing code + 1)
+    # 2. Generate Sequential Code (Find highest existing valid code + 1)
     m_list = get_airtable_data("Master List")
-    highest_code = 1000 # Default starting point if table is somehow empty
+    highest_code = 1000 # Default starting point
     for m in m_list:
         c = m['fields'].get('Code')
         if c:
             try:
                 num = int(str(c).strip())
-                if num > highest_code:
+                # SAFETY CAP: Ignore outliers like 9999 or accidental phone numbers
+                if highest_code < num < 9000:
                     highest_code = num
             except ValueError:
-                pass # Ignore if a code somehow isn't a valid number
+                pass 
     
     new_code = str(highest_code + 1)
     
