@@ -123,7 +123,7 @@ def approve_player(app_id):
     f = res.get('fields', {})
     email, first, last = f.get('Email'), f.get('First'), f.get('Last')
     
-    # 2. Generate Sequential Code (Find highest existing valid code + 1)
+    # 2. Generate Sequential Code
     m_list = get_airtable_data("Master List")
     highest_code = 1000 # Default starting point
     for m in m_list:
@@ -131,7 +131,7 @@ def approve_player(app_id):
         if c:
             try:
                 num = int(str(c).strip())
-                # SAFETY CAP: Ignore outliers like 9999 or accidental phone numbers
+                # SAFETY CAP: Ignore outliers
                 if highest_code < num < 9000:
                     highest_code = num
             except ValueError:
@@ -157,7 +157,7 @@ def approve_player(app_id):
         flash(f"Error adding to Master List: {error_msg}", "danger")
         return redirect(url_for('index'))
 
-    # 4. Update Applicant Status AND save to "Assigned Code" column
+    # 4. Update Applicant Status & Write back assigned code
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", 
                    headers=HEADERS, 
                    json={
