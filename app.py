@@ -98,7 +98,7 @@ def send_invite():
     subject = "🎾 Invitation: Saturday Tennis Gang"
     body = f"""<h3>You're invited!</h3>
     <p>Apply to join our Saturday tennis rotation here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
-    <p><b>Note:</b> Emails often land in SPAM. Please check your junk folder and mark us as 'Not Spam'!</p>"""
+    <p><b>Important:</b> Our emails often land in SPAM. Please check your junk folder and add {FROM_EMAIL} to your contacts!</p>"""
     send_email(email, subject, body)
     flash(f"Invite sent to {email}", "success")
     return redirect(url_for('index'))
@@ -106,15 +106,36 @@ def send_invite():
 @app.route('/approve_player/<app_id>', methods=['POST'])
 def approve_player(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    
+    # 1. Fetch data
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
-    email, first = f.get('Email'), f.get('First')
+    email, first, last = f.get('Email'), f.get('First'), f.get('Last')
     
+    # 2. Assign Code
     new_code = str(random.randint(1000, 9999))
-    master_data = {"fields": {"First": first, "Last": f.get('Last'), "Email": email, "Code": new_code, "Notes": f.get('Notes', '')}}
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
+    
+    # 3. Create Master List Record (Note: Using 'Notes' as discussed)
+    master_data = {
+        "fields": {
+            "First": first,
+            "Last": last,
+            "Email": email,
+            "Code": new_code,
+            "Notes": f.get('Notes', '') 
+        }
+    }
+    m_res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
+    
+    if m_res.status_code != 200:
+        error_msg = m_res.json().get('error', {}).get('message', 'Unknown Airtable Error')
+        flash(f"Error adding to Master List: {error_msg}", "danger")
+        return redirect(url_for('index'))
+
+    # 4. Update Applicant Status
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
     
+    # 5. Email Code
     subject = "🎾 Welcome to the Gang!"
     content = f"""<h3>Hi {first}!</h3>
     <p>Your application is approved. Your personal login code is: <b>{new_code}</b></p>
@@ -122,7 +143,7 @@ def approve_player(app_id):
     <p><b>SPAM WARNING:</b> Please add {FROM_EMAIL} to your contacts so you don't miss roster updates!</p>"""
     send_email(email, subject, content)
     
-    flash(f"Approved {first} and emailed code ({new_code})!", "success")
+    flash(f"Success! {first} approved and emailed code {new_code}.", "success")
     return redirect(url_for('index'))
 
 @app.route('/validate', methods=['POST'])
