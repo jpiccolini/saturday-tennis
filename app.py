@@ -106,7 +106,7 @@ def index():
             recent_logs = get_airtable_data("Logs", sort_field="Timestamp", direction="desc", max_records=10)
         else:
             now_utc = dt.datetime.utcnow()
-            # 5 == Saturday. 12 UTC is 6 AM MDT / 5 AM MST, which is safely the morning.
+            # 5 == Saturday. 12 UTC is 6 AM MDT / 5 AM MST
             if now_utc.weekday() == 5 and now_utc.hour >= 12:
                 show_emergency_btn = True
 
@@ -288,8 +288,57 @@ def apply():
     flash("Application Submitted!", "success")
     return redirect(url_for('index'))
 
+# --- AUTOMATED CRON JOB ROUTES ---
+
 @app.route('/cron/thursday')
 def cron_thursday():
     return "Thursday cron executed successfully", 200
+
+@app.route('/cron/monday')
+def cron_monday():
+    # 1. Clear last week's roster
+    for r in get_airtable_data("Signups"): 
+        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+    
+    # 2. Email everyone on the Master List
+    master_list = get_airtable_data("Master List")
+    subject = "🎾 Signups are OPEN for Saturday Tennis!"
+    
+    body = f"""<h3>Happy Monday, Gang!</h3>
+    <p>Signups for this Saturday's tennis rotation are now officially open.</p>
+    <p><b><a href='{SITE_URL}'>Click here to claim your spot or check the roster.</a></b></p>
+    <p><b>Quick Reminders:</b></p>
+    <ul>
+        <li>Only sign up if you know you can make it and arrive on time.</li>
+        <li>If you end up on the waitlist, be sure to check your email Saturday morning!</li>
+        <li><b>Important:</b> Please add <b>jpiccolini@dawsonschool.org</b> to your contacts. Check your Spam folder occasionally, and move emails like this back to your inbox so they stay "on your radar".</li>
+    </ul>
+    <p>See you on the courts,<br>Jim</p>"""
+    
+    for m in master_list:
+        email = m['fields'].get('Email')
+        if email:
+            send_email(email, subject, body)
+            
+    return "Monday cron executed: Roster reset and emails sent", 200
+
+@app.route('/cron/friday')
+def cron_friday():
+    master_list = get_airtable_data("Master List")
+    subject = "🎾 Tomorrow's Tennis Roster & Reminders"
+    
+    body = f"""<h3>Happy Friday!</h3>
+    <p>We are set for tennis tomorrow. Please check the live roster to confirm your status: <a href='{SITE_URL}'>{SITE_URL}</a></p>
+    <p><b>If you are confirmed:</b> See you tomorrow! If your plans have changed, PLEASE log in and cancel your spot right now so someone on the waitlist can play.</p>
+    <p><b>If you are on the waitlist:</b> Keep an eye on your email tonight and tomorrow morning. If someone drops out, you will receive an automatic email moving you to the confirmed list!</p>
+    <p><b>Important:</b> Please add <b>jpiccolini@dawsonschool.org</b> to your contacts. Check your Spam folder occasionally, and move emails like this back to your inbox so they stay "on your radar".</p>
+    <p>See you tomorrow,<br>Jim</p>"""
+    
+    for m in master_list:
+        email = m['fields'].get('Email')
+        if email:
+            send_email(email, subject, body)
+            
+    return "Friday cron executed: Reminder emails sent", 200
 
 if __name__ == '__main__': app.run(debug=True)
