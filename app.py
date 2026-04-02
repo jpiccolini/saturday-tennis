@@ -7,6 +7,7 @@ from sendgrid.helpers.mail import Mail
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
 
+# Environment Variables
 API_KEY = os.environ.get("AIRTABLE_API_KEY")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
 ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
@@ -97,7 +98,7 @@ def send_invite():
     subject = "🎾 Invitation: Saturday Tennis Gang"
     body = f"""<h3>You're invited!</h3>
     <p>Apply to join our Saturday tennis rotation here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
-    <p><b>Note:</b> Our emails often land in SPAM. Please check your spam folder and mark us as 'Not Spam'!</p>"""
+    <p><b>Note:</b> Emails often land in SPAM. Please check your junk folder and mark us as 'Not Spam'!</p>"""
     send_email(email, subject, body)
     flash(f"Invite sent to {email}", "success")
     return redirect(url_for('index'))
@@ -107,31 +108,23 @@ def approve_player(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
+    email, first = f.get('Email'), f.get('First')
+    
     new_code = str(random.randint(1000, 9999))
-    master_data = {"fields": {"First": f.get('First'), "Last": f.get('Last'), "Email": f.get('Email'), "Code": new_code, "Notes": f.get('Notes', '')}}
+    master_data = {"fields": {"First": first, "Last": f.get('Last'), "Email": email, "Code": new_code, "Notes": f.get('Notes', '')}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
-    flash(f"Approved {f.get('First')}! Code: {new_code}", "success")
-    return redirect(url_for('index'))
-
-@app.route('/send_welcome/<app_id>', methods=['POST'])
-def send_welcome(app_id):
-    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
-    f = res.get('fields', {})
-    email, first = f.get('Email'), f.get('First')
-    m_recs = get_airtable_data("Master List", filter_formula=f"AND({{First}}='{first}', {{Last}}='{f.get('Last')}')")
-    code = m_recs[0]['fields'].get('Code', 'TBD') if m_recs else "TBD"
+    
     subject = "🎾 Welcome to the Gang!"
     content = f"""<h3>Hi {first}!</h3>
-    <p>Your login code is: <b>{code}</b></p>
-    <p>Site: <a href='{SITE_URL}'>{SITE_URL}</a></p>
+    <p>Your application is approved. Your personal login code is: <b>{new_code}</b></p>
+    <p>Sign up here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
     <p><b>SPAM WARNING:</b> Please add {FROM_EMAIL} to your contacts so you don't miss roster updates!</p>"""
     send_email(email, subject, content)
-    flash(f"Welcome email sent to {first}!", "success")
+    
+    flash(f"Approved {first} and emailed code ({new_code})!", "success")
     return redirect(url_for('index'))
 
-# --- REMAINDER OF ROUTES (validate, signup, cancel, logout, etc.) STAY THE SAME ---
 @app.route('/validate', methods=['POST'])
 def validate():
     code = str(request.form.get('code', '')).strip()
