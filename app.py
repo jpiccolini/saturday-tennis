@@ -288,4 +288,8 @@ def apply():
     flash("Application Submitted!", "success")
     return redirect(url_for('index'))
 
+@app.route('/cron/thursday')
+def cron_thursday():
+    return "Thursday cron executed successfully", 200
+
 if __name__ == '__main__': app.run(debug=True)
