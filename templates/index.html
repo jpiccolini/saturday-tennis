@@ -30,7 +30,11 @@
             <h1 class="card-title text-success">🎾 Saturday Tennis</h1>
             <h5 class="text-muted">{{ target_date }} | {{ start_time }}{{ end_time }}</h5>
             <p class="badge bg-info text-dark fs-6 mt-2">{{ weather }}</p>
-            <p class="mt-2 mb-0 fw-bold">Total Complete Courts: {{ complete_courts }}</p>
+            <p class="mt-2 mb-0 fw-bold fs-5">
+                Total Complete Courts: <span class="text-success">{{ complete_courts }}</span> 
+                <span class="mx-2 text-muted">|</span> 
+                Waitlist: <span class="text-warning">{{ waitlist_count }}</span>
+            </p>
         </div>
     </div>
 
@@ -85,7 +89,7 @@
                 {% if waitlist_pos > 0 %}
                     <p class="text-warning fw-bold mt-2">You are #{{ waitlist_pos }} on the Waitlist.</p>
                 {% else %}
-                    <p class="text-success fw-bold mt-2">You are Confirmed!</p>
+                    <p class="text-success fw-bold mt-2">You are in a Complete Court!</p>
                 {% endif %}
             {% else %}
                 <form action="/signup" method="POST">
@@ -108,7 +112,7 @@
                     <h4 class="card-title">Live Roster</h4>
                     <ul class="list-group list-group-flush">
                     {% for player in roster %}
-                        {% if loop.index0 < 24 %}
+                        {% if loop.index0 < playing_cutoff %}
                             {% if loop.index0 % 4 == 0 %}
                                 <li class="list-group-item court-header">
                                     🎾 Court {{ (loop.index0 // 4) + 1 }}
@@ -120,6 +124,7 @@
                                 {% if session.user.is_admin %}
                                 <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
                                     <button name="status" value="Played" class="btn btn-sm btn-success py-0 px-1">✓</button>
+                                    <button name="status" value="Late" class="btn btn-sm btn-warning py-0 px-1 fw-bold">L</button>
                                     <button name="status" value="No-Show" class="btn btn-sm btn-danger py-0 px-1">✗</button>
                                 </form>
                                 {% endif %}
@@ -130,13 +135,20 @@
                     {% endfor %}
                     </ul>
 
-                    {% if roster|length > 24 %}
+                    {% if waitlist_count > 0 %}
                     <h5 class="mt-4 mb-2 text-warning">Waitlist</h5>
                     <ul class="list-group list-group-flush">
                     {% for player in roster %}
-                        {% if loop.index0 >= 24 %}
-                        <li class="list-group-item text-muted">
-                            WL #{{ loop.index0 - 23 }}. {{ player['First'] }} {{ player['Last'] }}
+                        {% if loop.index0 >= playing_cutoff %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+                            <span>WL #{{ loop.index0 - playing_cutoff + 1 }}. {{ player['First'] }} {{ player['Last'] }}</span>
+                            {% if session.user.is_admin %}
+                            <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
+                                <button name="status" value="Played" class="btn btn-sm btn-success py-0 px-1">✓</button>
+                                <button name="status" value="Late" class="btn btn-sm btn-warning py-0 px-1 fw-bold">L</button>
+                                <button name="status" value="No-Show" class="btn btn-sm btn-danger py-0 px-1">✗</button>
+                            </form>
+                            {% endif %}
                         </li>
                         {% endif %}
                     {% endfor %}
