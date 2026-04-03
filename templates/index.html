@@ -96,13 +96,13 @@
                                 <div>
                                     <span class="fw-bold">{{ loop.index }}. {{ player.First }} {{ player.Last }}</span>
                                     
-                                    {# Admin-only strike markers #}
+                                    {# SAFE CHECK: Admin-only strike markers #}
                                     {% if session.get('user') and session.user.get('is_admin') and player.strikes > 0 %}
                                         <span class="badge bg-dark ms-1 admin-badge">{{ player.strikes }} ⚠️</span>
                                     {% endif %}
                                 </div>
                                 
-                                {# Admin Attendance Controls #}
+                                {# SAFE CHECK: Admin Attendance Controls #}
                                 {% if session.get('user') and session.user.get('is_admin') %}
                                     <div class="btn-group shadow-sm">
                                         <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
