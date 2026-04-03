@@ -158,6 +158,17 @@ def signup():
                   json={"fields": {"First": session['user']['first'], "Last": session['user']['last'], "Player Code": str(session['user']['code'])}})
     return redirect(url_for('index'))
 
+@app.route('/')
+def index():
+    # Always provide default values for the template
+    curr_user = session.get('user') 
+    user_on_roster = False
+    
+    # Only try to access user data if curr_user exists
+    if curr_user:
+        # Your logic to check roster status here
+        pass
+
 @app.route('/logout')
 def logout():
     session.clear()
