@@ -147,12 +147,15 @@ def index():
             now_utc = dt.datetime.utcnow()
             if now_utc.weekday() == 5 and now_utc.hour >= 12: show_emergency_btn = True
 
+    now_utc = dt.datetime.utcnow()
+    is_past_deadline = (now_utc.weekday() == 4 and now_utc.hour >= 14) or (now_utc.weekday() == 5)
+
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, guest_requests=guest_requests, master_list=master_list, logs=recent_logs,
                            user_on_roster=user_on_roster, user_status=user_status, waitlist_pos=waitlist_pos, weather=weather_info,
                            show_emergency_btn=show_emergency_btn, complete_courts=complete_courts,
                            playing_cutoff=playing_cutoff, waitlist_count=waitlist_count, needs_sub_players=needs_sub_players,
-                           pending_sub_offer=pending_sub_offer)
+                           pending_sub_offer=pending_sub_offer, is_past_deadline=is_past_deadline)
 
 @app.route('/validate', methods=['POST'])
 def validate():
