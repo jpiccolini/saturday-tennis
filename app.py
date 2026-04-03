@@ -14,7 +14,7 @@ BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
 ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY")
 FROM_EMAIL = os.environ.get("FROM_EMAIL") 
-GMAIL_PW = os.environ.get("GMAIL_PASSWORD") # Your 16-character App Password
+GMAIL_PW = os.environ.get("GMAIL_PASSWORD") 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", FROM_EMAIL) 
 SITE_URL = "https://saturday-tennis.onrender.com"
 
@@ -24,7 +24,6 @@ def log_activity(name, action):
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
                   json={"fields": {"Name": name, "Action": action}})
 
-# UPDATED: Replaced SendGrid with Gmail (smtplib). Uses BCC for bulk emails.
 def send_email(to_emails, subject, html_content, is_multiple=False):
     if not FROM_EMAIL or not GMAIL_PW or not to_emails: return
     
@@ -36,7 +35,7 @@ def send_email(to_emails, subject, html_content, is_multiple=False):
     msg['Subject'] = subject
     
     if is_multiple:
-        msg['To'] = FROM_EMAIL # Addressed to self, others BCC'd
+        msg['To'] = FROM_EMAIL 
         recipients = to_emails + [FROM_EMAIL]
     else:
         msg['To'] = to_emails[0]
@@ -95,6 +94,13 @@ def index():
 
     signup_recs = get_airtable_data("Signups", sort_field="Created Time")
     roster = []
+    
+    # Calculate complete courts & dynamic waitlist
+    total_signups = len(signup_recs)
+    complete_courts = min(total_signups, 24) // 4
+    playing_cutoff = complete_courts * 4
+    waitlist_count = total_signups - playing_cutoff
+
     user_on_roster, waitlist_pos = False, 0
     curr_user = session.get('user')
 
@@ -103,11 +109,8 @@ def index():
         roster.append(fields)
         if curr_user and str(fields.get('Player Code')) == str(curr_user.get('code')):
             user_on_roster = True
-            if i >= 24: waitlist_pos = i - 23
-
-    # UPDATED: Calculate Complete Courts
-    confirmed_players = min(len(roster), 24)
-    complete_courts = confirmed_players // 4
+            if i >= playing_cutoff: 
+                waitlist_pos = i - playing_cutoff + 1
 
     weather_info = "Weather Unavailable"
     try:
@@ -135,7 +138,8 @@ def index():
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, master_list=master_list, logs=recent_logs,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info,
-                           show_emergency_btn=show_emergency_btn, complete_courts=complete_courts)
+                           show_emergency_btn=show_emergency_btn, complete_courts=complete_courts,
+                           playing_cutoff=playing_cutoff, waitlist_count=waitlist_count)
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -279,30 +283,33 @@ def signup():
     log_activity(f"{session['user']['first']} {session['user']['last']}", "Signed Up")
     return redirect(url_for('index'))
 
-# UPDATED: Enforces Friday 8 AM rule
 @app.route('/cancel', methods=['POST'])
 def cancel():
     if not session.get('user'): return redirect(url_for('index'))
     
     now_utc = dt.datetime.utcnow()
-    # 14:00 UTC is 8:00 AM MDT in Colorado
     is_past_deadline = (now_utc.weekday() == 4 and now_utc.hour >= 14) or (now_utc.weekday() == 5)
 
     recs = get_airtable_data("Signups", sort_field="Created Time")
     idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
     
     if idx is not None:
-        is_confirmed = idx < 24
-        waitlist_exists = len(recs) > 24
+        complete_courts = min(len(recs), 24) // 4
+        playing_cutoff = complete_courts * 4
         
-        if is_confirmed and is_past_deadline and not waitlist_exists:
-            flash("⚠️ It is past Friday 8 AM! You cannot cancel unless someone is on the waitlist to take your spot. Please find a sub and contact Jim.", "danger")
+        is_in_complete_court = idx < playing_cutoff
+        waitlist_exists = len(recs) > playing_cutoff
+        
+        # Block drops from full courts after Fri 8AM if nobody is waiting to fill the gap
+        if is_in_complete_court and is_past_deadline and not waitlist_exists:
+            flash("⚠️ It is past Friday 8 AM! You cannot cancel unless someone is on the waitlist (or in an incomplete court) to take your spot. Please find a sub and contact Jim.", "danger")
             return redirect(url_for('index'))
 
-        if idx < 24 and len(recs) > 24:
-            promo = recs[24]
+        # Normal cancellation proceeds (promotes the first person on waitlist/incomplete court into a full court)
+        if idx < playing_cutoff and waitlist_exists:
+            promo = recs[playing_cutoff]
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{promo['id']}", headers=HEADERS, json={"fields": {"Status": "Confirmed"}})
-            send_email(promo['fields'].get('Email'), "🎾 You're IN!", "A spot opened up. You are confirmed!", is_multiple=False)
+            send_email([promo['fields'].get('Email')], "🎾 You're IN!", "A spot opened up in a complete court. You are in!", is_multiple=False)
             
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS)
         log_activity(f"{session['user']['first']} {session['user']['last']}", "Cancelled")
