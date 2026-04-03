@@ -3,215 +3,420 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Saturday Tennis</title>
+    <title>Saturday Tennis Gang</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f4f6f8; font-family: Arial, sans-serif; }
-        .container { max-width: 800px; margin-top: 30px; margin-bottom: 30px; }
-        .court-header { background-color: #e9ecef; font-weight: bold; color: #2874A6; text-align: center; }
+        body { background-color: #f8f9fa; }
+        .roster-card { transition: 0.2s; }
+        .roster-card:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
     </style>
 </head>
 <body>
-<div class="container">
-
-    {% if needs_sub_players %}
-    <div class="alert alert-danger text-center fw-bold fs-5 shadow-sm">
-        🚨 URGENT: The following players need a sub: {{ needs_sub_players | join(', ') }} 🚨
-    </div>
-    {% endif %}
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show">
-            {{ message|safe }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <div class="card shadow-sm mb-4">
-        <div class="card-body text-center">
-            <h1 class="card-title text-success">🎾 Saturday Tennis</h1>
-            <h5 class="text-muted">{{ target_date }} | {{ start_time }}{{ end_time }}</h5>
-            <p class="badge bg-info text-dark fs-6 mt-2">{{ weather }}</p>
-            <p class="mt-2 mb-0 fw-bold fs-5">
-                Complete Courts: <span class="text-success">{{ complete_courts }}</span> | Waitlist: <span class="text-warning">{{ waitlist_count }}</span>
-            </p>
+    <div class="container py-4">
+        
+        <div class="text-center mb-4">
+            <h1 class="display-5 fw-bold text-success">🎾 Saturday Tennis Gang</h1>
+            <p class="lead mb-1"><strong>{{ target_date }}</strong> | {{ start_time }}{{ end_time }}</p>
+            <span class="badge bg-info text-dark fs-6">{{ weather }}</span>
         </div>
-    </div>
 
-    {% if not session.get('user') %}
-    <div class="row">
-        <div class="col-md-6 mb-3">
-            <div class="card shadow-sm h-100">
-                <div class="card-body">
-                    <h4 class="card-title">Player Login</h4>
-                    <form action="/validate" method="POST">
-                        <div class="mb-3"><input type="text" name="code" class="form-control" placeholder="Enter Player Code" required></div>
-                        <div class="mb-3"><input type="password" name="password" class="form-control" placeholder="Admin Password (Optional)"></div>
-                        <button type="submit" class="btn btn-primary w-100">Login</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 mb-3">
-            <div class="card shadow-sm h-100">
-                <div class="card-body">
-                    <h4 class="card-title">New Player?</h4>
-                    <form action="/apply" method="POST">
-                        <div class="row">
-                            <div class="col-6 mb-2"><input type="text" name="first" class="form-control" placeholder="First Name" required></div>
-                            <div class="col-6 mb-2"><input type="text" name="last" class="form-control" placeholder="Last Name" required></div>
-                        </div>
-                        <div class="mb-2"><input type="email" name="email" class="form-control" placeholder="Email" required></div>
-                        <div class="mb-2"><input type="text" name="phone" class="form-control" placeholder="Phone" required></div>
-                        <div class="mb-3"><textarea name="note" class="form-control" placeholder="Who invited you?" required></textarea></div>
-                        <button type="submit" class="btn btn-outline-success w-100">Apply to Join</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% else %}
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="mb-0">Welcome, {{ session.user.first }}!</h4>
-        <a href="/logout" class="btn btn-sm btn-secondary">Logout</a>
-    </div>
-
-    <div class="card shadow-sm mb-4 border-primary">
-        <div class="card-body text-center">
-            
-            {% if pending_sub_offer %}
-                <h4 class="text-success">You have a Sub Offer!</h4>
-                <p>Someone dropped. Click below to take their spot.</p>
-                <form action="/accept_sub" method="POST">
-                    <button type="submit" class="btn btn-success btn-lg w-100 mb-2">Accept Sub Spot</button>
-                </form>
-
-            {% elif user_status == 'NEEDS SUB' %}
-                <h4 class="text-danger">You Need a Sub</h4>
-                <p>Provide confirmed sub info below to release your spot.</p>
-                <form action="/provide_sub" method="POST">
-                    <div class="row g-2 mb-2">
-                        <div class="col-6"><input type="text" name="sub_first" class="form-control" placeholder="Sub First Name" required></div>
-                        <div class="col-6"><input type="text" name="sub_last" class="form-control" placeholder="Sub Last Name" required></div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message|safe }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
-                    <input type="email" name="sub_email" class="form-control mb-2" placeholder="Sub Email Address" required>
-                    <button type="submit" class="btn btn-danger w-100">Confirm My Sub</button>
-                </form>
-
-            {% elif user_on_roster %}
-                <form action="/cancel" method="POST">
-                    <button type="submit" class="btn btn-danger btn-lg w-100 mb-2">Cancel My Spot</button>
-                </form>
-                {% if user_status == 'PENDING SUB' %}
-                    <p class="text-warning fw-bold mt-2">Waiting for Waitlist to accept your drop...</p>
-                {% endif %}
-            {% else %}
-                <form action="/signup" method="POST">
-                    <button type="submit" class="btn btn-success btn-lg w-100">Sign Up to Play</button>
-                </form>
+                {% endfor %}
             {% endif %}
-        </div>
-    </div>
-    {% endif %}
+        {% endwith %}
 
-    <div class="row">
-        <div class="col-md-{{ '6' if session.get('user') else '12' }} mb-4">
-            <div class="card shadow-sm h-100">
-                <div class="card-body">
-                    <h4 class="card-title">Live Roster</h4>
-                    <ul class="list-group list-group-flush">
-                    {% for player in roster %}
-                        {% if loop.index0 < playing_cutoff %}
-                            {% if loop.index0 % 4 == 0 %}<li class="list-group-item court-header">🎾 Court {{ (loop.index0 // 4) + 1 }}</li>{% endif %}
-                            
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span>{{ loop.index }}. {{ player['First'] }} {{ player['Last'] }}
-                                    {% if player.get('Label') == 'NEEDS SUB' %}<span class="badge bg-danger ms-2">NEEDS SUB</span>
-                                    {% elif player.get('Label') == 'PENDING SUB' %}<span class="badge bg-warning text-dark ms-2">PENDING SUB</span>
-                                    {% elif player.get('Label') %}<span class="badge bg-success ms-2">{{ player.get('Label') }}</span>{% endif %}
-                                </span>
-                            </li>
-                        {% endif %}
-                    {% endfor %}
-                    </ul>
-
-                    {% if waitlist_count > 0 %}
-                    <h5 class="mt-4 mb-2 text-warning">Waitlist</h5>
-                    <ul class="list-group list-group-flush">
-                    {% for player in roster %}
-                        {% if loop.index0 >= playing_cutoff %}
-                        <li class="list-group-item text-muted">
-                            WL #{{ loop.index0 - playing_cutoff + 1 }}. {{ player['First'] }} {{ player['Last'] }}
-                        </li>
-                        {% endif %}
-                    {% endfor %}
-                    </ul>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        {% if session.get('user') %}
-        <div class="col-md-6 mb-4">
-            {% if user_on_roster %}
-            <div class="card shadow-sm mb-4 border-info">
-                <div class="card-body">
-                    <h5 class="card-title">Request a Guest</h5>
-                    <form action="/request_guest" method="POST">
-                        <div class="row g-2 mb-2">
-                            <div class="col-6"><input type="text" name="guest_first" class="form-control form-control-sm" placeholder="First Name" required></div>
-                            <div class="col-6"><input type="text" name="guest_last" class="form-control form-control-sm" placeholder="Last Name" required></div>
+        <div class="row">
+            <div class="col-md-5 mb-4">
+                
+                {% if session.user %}
+                    <div class="card shadow-sm mb-4 border-success">
+                        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Player Dashboard: {{ session.user.first }}</h5>
+                            <a href="/logout" class="btn btn-sm btn-light text-success fw-bold">Logout</a>
                         </div>
-                        <input type="email" name="guest_email" class="form-control form-control-sm mb-2" placeholder="Email" required>
-                        <input type="text" name="guest_phone" class="form-control form-control-sm mb-2" placeholder="Phone" required>
-                        <button type="submit" class="btn btn-sm btn-info w-100">Send Request to Admin</button>
-                    </form>
+                        <div class="card-body text-center">
+                            
+                            {% if pending_sub_offer %}
+                                <h4 class="text-success fw-bold">You have a Sub Offer!</h4>
+                                <p>Someone dropped from a full court. Click below to accept their spot!</p>
+                                <form action="/accept_sub" method="POST">
+                                    <button type="submit" class="btn btn-success btn-lg w-100 mb-2 shadow">Accept Sub Spot</button>
+                                </form>
+
+                            {% elif user_status == 'NEEDS SUB' %}
+                                <h4 class="text-danger fw-bold">You Need a Sub</h4>
+                                <p class="small">Because there was no waitlist at the time of your late drop, you must provide confirmed sub info below to release your spot.</p>
+                                <form action="/provide_sub" method="POST">
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-6"><input type="text" name="sub_first" class="form-control" placeholder="Sub First Name" required></div>
+                                        <div class="col-6"><input type="text" name="sub_last" class="form-control" placeholder="Sub Last Name" required></div>
+                                    </div>
+                                    <input type="email" name="sub_email" class="form-control mb-2" placeholder="Sub Email Address" required>
+                                    <button type="submit" class="btn btn-danger w-100 fw-bold">Confirm My Sub</button>
+                                </form>
+
+                            {% elif user_on_roster %}
+                                <p class="text-muted small mb-3">Click a button below to manage your spot or bring a guest.</p>
+                                
+                                <div class="d-grid gap-2">
+                                    
+                                    <button type="button" class="btn {% if is_past_deadline %}btn-secondary disabled{% else %}btn-danger{% endif %} fw-bold" data-bs-toggle="modal" data-bs-target="#standardDropModal">
+                                        Standard Drop
+                                    </button>
+
+                                    <button type="button" class="btn {% if is_past_deadline %}btn-warning text-dark{% else %}btn-secondary disabled{% endif %} fw-bold" data-bs-toggle="modal" data-bs-target="#lateDropModal">
+                                        Late Drop / Sub
+                                    </button>
+
+                                    <button type="button" class="btn btn-success fw-bold" data-bs-toggle="modal" data-bs-target="#provideSubModal">
+                                        Provide a Sub
+                                    </button>
+                                    
+                                    <button type="button" class="btn btn-info text-white fw-bold" data-bs-toggle="modal" data-bs-target="#requestGuestModal">
+                                        Request Guest
+                                    </button>
+
+                                </div>
+                            {% else %}
+                                <form action="/signup" method="POST">
+                                    <button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-light"><strong>Update Contact Info</strong></div>
+                        <div class="card-body">
+                            <form action="/update_profile" method="POST">
+                                <div class="mb-2">
+                                    <input type="email" name="email" class="form-control" value="{{ session.user.email }}" placeholder="Email">
+                                </div>
+                                <div class="mb-2">
+                                    <input type="text" name="phone" class="form-control" value="{{ session.user.phone }}" placeholder="Phone">
+                                </div>
+                                <button type="submit" class="btn btn-sm btn-outline-primary w-100">Save Profile</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    {% if show_emergency_btn %}
+                    <div class="card shadow-sm border-danger mb-4">
+                        <div class="card-body text-center">
+                            <h5 class="text-danger">🚨 Emergency Sub Required?</h5>
+                            <p class="small text-muted mb-2">Clicking this will instantly email the entire master list asking for a sub.</p>
+                            <form action="/emergency_sub" method="POST" onsubmit="return confirm('Are you sure you want to email the entire directory?');">
+                                <button type="submit" class="btn btn-danger fw-bold w-100">Broadcast Emergency Sub</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                {% else %}
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-primary text-white"><h5 class="mb-0">Player Login</h5></div>
+                        <div class="card-body">
+                            <form action="/validate" method="POST">
+                                <div class="mb-3">
+                                    <label class="form-label">Player Code</label>
+                                    <input type="number" class="form-control" name="code" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted small">Admin Password (Optional)</label>
+                                    <input type="password" class="form-control" name="password">
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">Login</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-secondary text-white"><h5 class="mb-0">New Player Application</h5></div>
+                        <div class="card-body">
+                            <form action="/apply" method="POST">
+                                <div class="row g-2 mb-2">
+                                    <div class="col-6"><input type="text" name="first" class="form-control" placeholder="First Name" required></div>
+                                    <div class="col-6"><input type="text" name="last" class="form-control" placeholder="Last Name" required></div>
+                                </div>
+                                <input type="email" name="email" class="form-control mb-2" placeholder="Email Address" required>
+                                <input type="text" name="phone" class="form-control mb-2" placeholder="Phone Number" required>
+                                <textarea name="note" class="form-control mb-3" rows="2" placeholder="Brief note / NTRP Level"></textarea>
+                                <button type="submit" class="btn btn-secondary w-100">Submit Application</button>
+                            </form>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="col-md-7">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <h4 class="mb-0">Live Roster</h4>
+                        <span class="badge bg-light text-dark">Total Signed Up: {{ roster|length }}</span>
+                    </div>
+                    <div class="card-body">
+                        {% if roster %}
+                            <div class="list-group list-group-flush mb-4">
+                            {% for player in roster %}
+                                {% if loop.index0 == playing_cutoff %}
+                                    </div>
+                                    <hr>
+                                    <h5 class="text-warning mt-3 mb-3">Waitlist ({{ waitlist_count }})</h5>
+                                    <div class="list-group list-group-flush">
+                                {% endif %}
+                                
+                                <div class="list-group-item d-flex justify-content-between align-items-center roster-card">
+                                    <div>
+                                        <span class="fw-bold fs-5">{{ loop.index }}. {{ player.First }} {{ player.Last }}</span>
+                                        {% if player.Label %}
+                                            <span class="badge {% if player.Label == 'NEEDS SUB' %}bg-danger{% elif 'SUB' in player.Label %}bg-success{% else %}bg-primary{% endif %} ms-2">{{ player.Label }}</span>
+                                        {% endif %}
+                                    </div>
+                                    {% if session.user and session.user.is_admin %}
+                                    <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
+                                        <button type="submit" name="status" value="Played" class="btn btn-sm btn-outline-success">✅</button>
+                                        <button type="submit" name="status" value="No Show" class="btn btn-sm btn-outline-danger">❌</button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="text-center py-4 text-muted">
+                                <h5>No signups yet for this week!</h5>
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
-            {% endif %}
+        </div>
 
-            <div class="card shadow-sm h-100">
-                <div class="card-body">
-                    <h4 class="card-title">Directory</h4>
-                    <input type="text" id="dirSearch" class="form-control mb-2" placeholder="Search by name...">
-                    <button id="showMoreBtn" class="btn btn-sm btn-outline-secondary w-100 mb-2">Load Directory</button>
-                    <div style="max-height: 400px; overflow-y: auto;">
-                        <ul class="list-group list-group-flush text-sm" id="dirList"></ul>
+        {% if session.user and session.user.is_admin %}
+        <hr class="my-5">
+        <div class="row">
+            <div class="col-12 mb-3">
+                <h3 class="text-danger">Admin Control Panel</h3>
+            </div>
+            
+            <div class="col-md-4 mb-4">
+                <div class="card shadow-sm border-danger">
+                    <div class="card-header bg-danger text-white">Approve Players</div>
+                    <div class="card-body">
+                        {% if applicants %}
+                            <ul class="list-group mb-3">
+                            {% for app in applicants %}
+                                <li class="list-group-item">
+                                    <strong>{{ app.fields.First }} {{ app.fields.Last }}</strong><br>
+                                    <small>{{ app.fields.Email }}</small>
+                                    <form action="/approve_player/{{ app.id }}" method="POST" class="mt-2">
+                                        <button class="btn btn-sm btn-success w-100">Approve & Assign Code</button>
+                                    </form>
+                                </li>
+                            {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted small">No pending player applications.</p>
+                        {% endif %}
+
+                        <hr>
+                        <form action="/send_invite" method="POST">
+                            <label class="form-label small">Send Application Invite</label>
+                            <div class="input-group">
+                                <input type="email" name="invite_email" class="form-control" placeholder="Email" required>
+                                <button class="btn btn-outline-danger" type="submit">Send</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4 mb-4">
+                <div class="card shadow-sm border-info">
+                    <div class="card-header bg-info text-white">Guest Requests</div>
+                    <div class="card-body">
+                        {% if guest_requests %}
+                            <ul class="list-group">
+                            {% for guest in guest_requests %}
+                                <li class="list-group-item">
+                                    <strong>{{ guest.fields.First }} {{ guest.fields.Last }}</strong><br>
+                                    <small>Sponsor: {{ guest.fields.Sponsor }}</small>
+                                    <form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-2">
+                                        <button class="btn btn-sm btn-info text-white w-100">Approve & Add to Roster</button>
+                                    </form>
+                                </li>
+                            {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted small">No pending guest requests.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4 mb-4">
+                <div class="card shadow-sm border-dark">
+                    <div class="card-header bg-dark text-white">Settings & Danger Zone</div>
+                    <div class="card-body">
+                        <form action="/admin_action" method="POST" class="mb-3">
+                            <input type="hidden" name="action" value="labels">
+                            <label class="form-label small">Update Top Banner Settings</label>
+                            <input type="text" name="date" class="form-control mb-2" value="{{ target_date }}">
+                            <input type="text" name="time" class="form-control mb-2" value="{{ start_time }}">
+                            <button type="submit" class="btn btn-sm btn-primary w-100">Save Display Settings</button>
+                        </form>
+                        <hr>
+                        <form action="/admin_action" method="POST" onsubmit="return confirm('Are you sure you want to clear the entire roster?');">
+                            <input type="hidden" name="action" value="reset_roster">
+                            <button type="submit" class="btn btn-sm btn-danger w-100">Clear Current Roster</button>
+                        </form>
                     </div>
                 </div>
             </div>
         </div>
         {% endif %}
-    </div>
 
-    {% if session.get('user') and session.user.is_admin %}
-    <div class="card shadow-sm border-danger mb-5">
-        <div class="card-header bg-danger text-white fw-bold">⚙️ Admin Dashboard</div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-6">
-                    <h5>Pending Guests</h5>
-                    <ul class="list-group mb-3">
-                    {% for g in guest_requests %}
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                            {{ g['fields'].get('First') }} {{ g['fields'].get('Last') }} (Sponsor: {{ g['fields'].get('Sponsor') }})
-                            <form action="/approve_guest/{{ g['id'] }}" method="POST"><button type="submit" class="btn btn-sm btn-success">Accept</button></form>
-                        </li>
-                    {% else %}
-                        <li class="list-group-item text-muted">No pending guests.</li>
-                    {% endfor %}
-                    </ul>
+        {% if session.user %}
+        <hr class="my-5">
+        <div class="card shadow-sm mb-5">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0">Club Directory</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Name</th>
+                                <th>Contact Info</th>
+                                {% if session.user.is_admin %}<th>Admin Notes</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for player in master_list %}
+                            <tr>
+                                <td><strong>{{ player.fields.First }} {{ player.fields.Last }}</strong></td>
+                                <td>
+                                    {% if player.fields.Email %}<a href="mailto:{{ player.fields.Email }}">{{ player.fields.Email }}</a><br>{% endif %}
+                                    {% if player.fields.Phone %}{{ player.fields.Phone }}{% endif %}
+                                </td>
+                                {% if session.user.is_admin %}
+                                <td>
+                                    <form action="/admin_action" method="POST" class="d-flex">
+                                        <input type="hidden" name="action" value="player_update">
+                                        <input type="hidden" name="player_id" value="{{ player.id }}">
+                                        <input type="text" name="note" class="form-control form-control-sm me-2" value="{{ player.fields.Notes|default('') }}" placeholder="Admin Notes">
+                                        <button class="btn btn-sm btn-outline-secondary">Save</button>
+                                    </form>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
+        {% endif %}
+
+    </div>
+
+    {% if session.user %}
+    
+    <div class="modal fade" id="standardDropModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-danger text-white">
+            <h5 class="modal-title">Standard Drop (Mon - Thu)</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body text-start">
+            <p><strong>The Rule:</strong> Monday through Thursday, you can drop your spot freely. If there is a waitlist, the first person waiting will automatically be bumped up to fill your spot.</p>
+            <p>Are you sure you want to drop?</p>
+          </div>
+          <div class="modal-footer">
+            <form action="/cancel" method="POST" class="w-100">
+                <button type="submit" class="btn btn-danger w-100 fw-bold shadow">Yes, Cancel My Spot</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="lateDropModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-warning text-dark">
+            <h5 class="modal-title">Late Drop (Friday - Saturday)</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body text-start">
+            <p><strong>The Rule:</strong> It is past the Friday 8 AM deadline. To prevent leaving an incomplete court stranded, late drops follow this automated process:</p>
+            <ul>
+                <li><strong>If there is a waitlist:</strong> We will email the first player waiting. You will be marked as "Pending Sub" and released <em>only</em> once they click accept.</li>
+                <li><strong>If there is NO waitlist:</strong> You will be marked "Needs Sub". <strong>You are responsible for finding a replacement</strong> and entering their info on the dashboard.</li>
+            </ul>
+          </div>
+          <div class="modal-footer">
+            <form action="/cancel" method="POST" class="w-100">
+                <button type="submit" class="btn btn-warning text-dark w-100 fw-bold shadow">Initiate Late Drop</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="provideSubModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-success text-white">
+            <h5 class="modal-title">Provide a Sub</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body text-start">
+            <p><strong>The Rule:</strong> If you already have a confirmed sub to take your place, you can enter their info here at any time. They will immediately take your spot on the roster and receive a confirmation email with court details.</p>
+            <form action="/provide_sub" method="POST">
+                <div class="row g-2 mb-2">
+                    <div class="col-6"><input type="text" name="sub_first" class="form-control" placeholder="Sub First Name" required></div>
+                    <div class="col-6"><input type="text" name="sub_last" class="form-control" placeholder="Sub Last Name" required></div>
+                </div>
+                <input type="email" name="sub_email" class="form-control mb-3" placeholder="Sub Email Address" required>
+                <button type="submit" class="btn btn-success w-100 fw-bold shadow">Swap Me Out</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="requestGuestModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-info text-white">
+            <h5 class="modal-title">Request a Guest</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body text-start">
+            <p><strong>The Rule:</strong> Want to bring a friend to play? Submit their details here. Jim will receive an alert to review. Once approved, your guest will be automatically added to the roster!</p>
+            <form action="/request_guest" method="POST">
+                <div class="row g-2 mb-2">
+                    <div class="col-6"><input type="text" name="guest_first" class="form-control" placeholder="First Name" required></div>
+                    <div class="col-6"><input type="text" name="guest_last" class="form-control" placeholder="Last Name" required></div>
+                </div>
+                <input type="email" name="guest_email" class="form-control mb-2" placeholder="Email" required>
+                <input type="text" name="guest_phone" class="form-control mb-3" placeholder="Phone" required>
+                <button type="submit" class="btn btn-info text-white w-100 fw-bold shadow">Send Guest Request</button>
+            </form>
+          </div>
+        </div>
+      </div>
     </div>
     {% endif %}
 
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
