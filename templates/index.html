@@ -27,7 +27,7 @@
 
     <div class="card shadow-sm mb-4">
         <div class="card-body text-center">
-            <h1 class="card-title text-success">🎾 Saturday Tennis</h1>
+            <h1 class="card-title text-success">🎾 Saturday Tennis Gang @ Dawson School</h1>
             <h5 class="text-muted">{{ target_date }} | {{ start_time }}{{ end_time }}</h5>
             <p class="badge bg-info text-dark fs-6 mt-2">{{ weather }}</p>
             <p class="mt-2 mb-0 fw-bold fs-5">
@@ -66,8 +66,8 @@
                             <div class="col-6 mb-2"><input type="text" name="last" class="form-control" placeholder="Last Name" required></div>
                         </div>
                         <div class="mb-2"><input type="email" name="email" class="form-control" placeholder="Email" required></div>
-                        <div class="mb-2"><input type="text" name="phone" class="form-control" placeholder="Phone"></div>
-                        <div class="mb-3"><textarea name="note" class="form-control" placeholder="Who invited you?"></textarea></div>
+                        <div class="mb-2"><input type="text" name="phone" class="form-control" placeholder="Phone" required></div>
+                        <div class="mb-3"><textarea name="note" class="form-control" placeholder="Who invited you?" required></textarea></div>
                         <button type="submit" class="btn btn-outline-success w-100">Apply to Join</button>
                     </form>
                 </div>
@@ -75,6 +75,7 @@
         </div>
     </div>
     {% else %}
+    
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0">Welcome, {{ session.user.first }}!</h4>
         <a href="/logout" class="btn btn-sm btn-secondary">Logout</a>
@@ -104,9 +105,10 @@
             {% endif %}
         </div>
     </div>
+    {% endif %}
 
     <div class="row">
-        <div class="col-md-6 mb-4">
+        <div class="col-md-{{ '6' if session.get('user') else '12' }} mb-4">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
                     <h4 class="card-title">Live Roster</h4>
@@ -121,7 +123,7 @@
                             
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                 <span>{{ loop.index }}. {{ player['First'] }} {{ player['Last'] }}</span>
-                                {% if session.user.is_admin %}
+                                {% if session.get('user') and session.user.is_admin %}
                                 <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
                                     <button name="status" value="Played" class="btn btn-sm btn-success py-0 px-1">✓</button>
                                     <button name="status" value="Late" class="btn btn-sm btn-warning py-0 px-1 fw-bold">L</button>
@@ -142,7 +144,7 @@
                         {% if loop.index0 >= playing_cutoff %}
                         <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
                             <span>WL #{{ loop.index0 - playing_cutoff + 1 }}. {{ player['First'] }} {{ player['Last'] }}</span>
-                            {% if session.user.is_admin %}
+                            {% if session.get('user') and session.user.is_admin %}
                             <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
                                 <button name="status" value="Played" class="btn btn-sm btn-success py-0 px-1">✓</button>
                                 <button name="status" value="Late" class="btn btn-sm btn-warning py-0 px-1 fw-bold">L</button>
@@ -158,6 +160,7 @@
             </div>
         </div>
 
+        {% if session.get('user') %}
         <div class="col-md-6 mb-4">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
@@ -173,24 +176,21 @@
                     </form>
 
                     <h4 class="card-title mt-4">Player Directory</h4>
-                    <div style="max-height: 300px; overflow-y: auto;">
-                        <ul class="list-group list-group-flush text-sm">
-                        {% for m in master_list %}
-                            {% set f = m['fields'] %}
-                            <li class="list-group-item py-1">
-                                <strong>{{ f.get('First') }} {{ f.get('Last') }}</strong><br>
-                                <a href="mailto:{{ f.get('Email') }}">{{ f.get('Email') }}</a> | 
-                                <a href="tel:{{ f.get('Phone') }}">{{ f.get('Phone') }}</a>
-                            </li>
-                        {% endfor %}
-                        </ul>
+                    
+                    <input type="text" id="dirSearch" class="form-control mb-2" placeholder="Search by name...">
+                    <button id="showMoreBtn" class="btn btn-sm btn-outline-secondary w-100 mb-2">Load Directory (20 at a time)</button>
+                    
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <ul class="list-group list-group-flush text-sm" id="dirList">
+                            </ul>
                     </div>
                 </div>
             </div>
         </div>
+        {% endif %}
     </div>
 
-    {% if session.user.is_admin %}
+    {% if session.get('user') and session.user.is_admin %}
     <div class="card shadow-sm border-danger mb-5">
         <div class="card-header bg-danger text-white fw-bold">⚙️ Admin Dashboard</div>
         <div class="card-body">
@@ -233,8 +233,84 @@
     </div>
     {% endif %}
 
-    {% endif %}
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+{% if session.get('user') %}
+<script>
+    // Load airtight JSON payload from Python/Jinja
+    const dirData = [
+        {% for m in master_list %}
+        {% set f = m['fields'] %}
+        {
+            id: "{{ loop.index }}",
+            name: {{ (f.get('First', '') ~ ' ' ~ f.get('Last', '')) | tojson }},
+            email: {{ f.get('Email', '') | tojson }},
+            phone: {{ f.get('Phone', '') | tojson }}
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    const dirList = document.getElementById('dirList');
+    const dirSearch = document.getElementById('dirSearch');
+    const showMoreBtn = document.getElementById('showMoreBtn');
+    
+    let currentIndex = 0;
+    const chunkSize = 20;
+
+    function renderPlayers(players, append = false) {
+        if (!append) dirList.innerHTML = '';
+        players.forEach(p => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item py-1';
+            // Added Collapse logic for contact info
+            li.innerHTML = `
+                <a data-bs-toggle="collapse" href="#collapse_${p.id}" role="button" aria-expanded="false" class="text-decoration-none fw-bold text-dark d-block">
+                    ${p.name}
+                </a>
+                <div class="collapse" id="collapse_${p.id}">
+                    <div class="mt-2 small text-muted">
+                        <a href="mailto:${p.email}">${p.email}</a> <br>
+                        <a href="tel:${p.phone}">${p.phone}</a>
+                    </div>
+                </div>
+            `;
+            dirList.appendChild(li);
+        });
+    }
+
+    showMoreBtn.addEventListener('click', () => {
+        if (dirSearch.value.trim() !== '') {
+            dirSearch.value = '';
+            currentIndex = 0;
+        }
+        
+        const nextChunk = dirData.slice(currentIndex, currentIndex + chunkSize);
+        renderPlayers(nextChunk, true);
+        currentIndex += chunkSize;
+        
+        if (currentIndex >= dirData.length) {
+            showMoreBtn.style.display = 'none';
+        }
+    });
+
+    dirSearch.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        if (query === '') {
+            dirList.innerHTML = '';
+            currentIndex = 0;
+            showMoreBtn.style.display = 'block';
+            showMoreBtn.innerText = 'Load Directory (20 at a time)';
+            return;
+        }
+        
+        // Show instant matches when searching
+        const matches = dirData.filter(p => p.name.toLowerCase().includes(query));
+        renderPlayers(matches, false);
+        showMoreBtn.style.display = 'none';
+    });
+</script>
+{% endif %}
 </body>
 </html>
