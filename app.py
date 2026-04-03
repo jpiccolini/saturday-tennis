@@ -24,10 +24,10 @@ def log_activity(name, action):
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
                   json={"fields": {"Name": name, "Action": action}})
 
-def send_email(to_email, subject, html_content):
-    if not SG_KEY or not FROM_EMAIL: return
-    message = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html_content)
+def send_email(to_emails, subject, html_content, is_multiple=False):
+    if not SG_KEY or not FROM_EMAIL or not to_emails: return
     try:
+        message = Mail(from_email=FROM_EMAIL, to_emails=to_emails, subject=subject, html_content=html_content, is_multiple=is_multiple)
         sg = SendGridAPIClient(SG_KEY)
         sg.send(message)
     except Exception as e: print(f"Email Error: {e}")
@@ -296,14 +296,11 @@ def cron_thursday():
 
 @app.route('/cron/monday')
 def cron_monday():
-    # 1. Clear last week's roster
     for r in get_airtable_data("Signups"): 
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
     
-    # 2. Email everyone on the Master List
     master_list = get_airtable_data("Master List")
     subject = "🎾 Signups are OPEN for Saturday Tennis!"
-    
     body = f"""<h3>Happy Monday, Gang!</h3>
     <p>Signups for this Saturday's tennis rotation are now officially open.</p>
     <p><b><a href='{SITE_URL}'>Click here to claim your spot or check the roster.</a></b></p>
@@ -315,18 +312,16 @@ def cron_monday():
     </ul>
     <p>See you on the courts,<br>Jim</p>"""
     
-    for m in master_list:
-        email = m['fields'].get('Email')
-        if email:
-            send_email(email, subject, body)
+    # Gather all emails into a list and send at once
+    emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+    send_email(emails, subject, body, is_multiple=True)
             
-    return "Monday cron executed: Roster reset and emails sent", 200
+    return "Monday cron executed: Roster reset and batch emails sent", 200
 
 @app.route('/cron/friday')
 def cron_friday():
     master_list = get_airtable_data("Master List")
     subject = "🎾 Tomorrow's Tennis Roster & Reminders"
-    
     body = f"""<h3>Happy Friday!</h3>
     <p>We are set for tennis tomorrow. Please check the live roster to confirm your status: <a href='{SITE_URL}'>{SITE_URL}</a></p>
     <p><b>If you are confirmed:</b> See you tomorrow! If your plans have changed, PLEASE log in and cancel your spot right now so someone on the waitlist can play.</p>
@@ -334,11 +329,9 @@ def cron_friday():
     <p><b>Important:</b> Please add <b>jpiccolini@dawsonschool.org</b> to your contacts. Check your Spam folder occasionally, and move emails like this back to your inbox so they stay "on your radar".</p>
     <p>See you tomorrow,<br>Jim</p>"""
     
-    for m in master_list:
-        email = m['fields'].get('Email')
-        if email:
-            send_email(email, subject, body)
+    # Gather all emails into a list and send at once
+    emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+    send_email(emails, subject, body, is_multiple=True)
             
-    return "Friday cron executed: Reminder emails sent", 200
-
+    return "Friday cron executed: Batch reminder emails sent", 200
 if __name__ == '__main__': app.run(debug=True)
