@@ -14,6 +14,12 @@
 <body>
 <div class="container">
 
+    {% if needs_sub_players %}
+    <div class="alert alert-danger text-center fw-bold fs-5 shadow-sm">
+        🚨 URGENT: The following players need a sub: {{ needs_sub_players | join(', ') }} 🚨
+    </div>
+    {% endif %}
+
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
@@ -27,13 +33,11 @@
 
     <div class="card shadow-sm mb-4">
         <div class="card-body text-center">
-            <h1 class="card-title text-success">🎾 Saturday Tennis Gang @ Dawson School</h1>
+            <h1 class="card-title text-success">🎾 Saturday Tennis</h1>
             <h5 class="text-muted">{{ target_date }} | {{ start_time }}{{ end_time }}</h5>
             <p class="badge bg-info text-dark fs-6 mt-2">{{ weather }}</p>
             <p class="mt-2 mb-0 fw-bold fs-5">
-                Total Complete Courts: <span class="text-success">{{ complete_courts }}</span> 
-                <span class="mx-2 text-muted">|</span> 
-                Waitlist: <span class="text-warning">{{ waitlist_count }}</span>
+                Complete Courts: <span class="text-success">{{ complete_courts }}</span> | Waitlist: <span class="text-warning">{{ waitlist_count }}</span>
             </p>
         </div>
     </div>
@@ -45,12 +49,8 @@
                 <div class="card-body">
                     <h4 class="card-title">Player Login</h4>
                     <form action="/validate" method="POST">
-                        <div class="mb-3">
-                            <input type="text" name="code" class="form-control" placeholder="Enter Player Code" required>
-                        </div>
-                        <div class="mb-3">
-                            <input type="password" name="password" class="form-control" placeholder="Admin Password (Optional)">
-                        </div>
+                        <div class="mb-3"><input type="text" name="code" class="form-control" placeholder="Enter Player Code" required></div>
+                        <div class="mb-3"><input type="password" name="password" class="form-control" placeholder="Admin Password (Optional)"></div>
                         <button type="submit" class="btn btn-primary w-100">Login</button>
                     </form>
                 </div>
@@ -75,33 +75,44 @@
         </div>
     </div>
     {% else %}
-    
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0">Welcome, {{ session.user.first }}!</h4>
         <a href="/logout" class="btn btn-sm btn-secondary">Logout</a>
     </div>
 
-    <div class="card shadow-sm mb-4">
+    <div class="card shadow-sm mb-4 border-primary">
         <div class="card-body text-center">
-            {% if user_on_roster %}
+            
+            {% if pending_sub_offer %}
+                <h4 class="text-success">You have a Sub Offer!</h4>
+                <p>Someone dropped. Click below to take their spot.</p>
+                <form action="/accept_sub" method="POST">
+                    <button type="submit" class="btn btn-success btn-lg w-100 mb-2">Accept Sub Spot</button>
+                </form>
+
+            {% elif user_status == 'NEEDS SUB' %}
+                <h4 class="text-danger">You Need a Sub</h4>
+                <p>Provide confirmed sub info below to release your spot.</p>
+                <form action="/provide_sub" method="POST">
+                    <div class="row g-2 mb-2">
+                        <div class="col-6"><input type="text" name="sub_first" class="form-control" placeholder="Sub First Name" required></div>
+                        <div class="col-6"><input type="text" name="sub_last" class="form-control" placeholder="Sub Last Name" required></div>
+                    </div>
+                    <input type="email" name="sub_email" class="form-control mb-2" placeholder="Sub Email Address" required>
+                    <button type="submit" class="btn btn-danger w-100">Confirm My Sub</button>
+                </form>
+
+            {% elif user_on_roster %}
                 <form action="/cancel" method="POST">
                     <button type="submit" class="btn btn-danger btn-lg w-100 mb-2">Cancel My Spot</button>
                 </form>
-                {% if waitlist_pos > 0 %}
-                    <p class="text-warning fw-bold mt-2">You are #{{ waitlist_pos }} on the Waitlist.</p>
-                {% else %}
-                    <p class="text-success fw-bold mt-2">You are in a Complete Court!</p>
+                {% if user_status == 'PENDING SUB' %}
+                    <p class="text-warning fw-bold mt-2">Waiting for Waitlist to accept your drop...</p>
                 {% endif %}
             {% else %}
                 <form action="/signup" method="POST">
                     <button type="submit" class="btn btn-success btn-lg w-100">Sign Up to Play</button>
                 </form>
-            {% endif %}
-
-            {% if show_emergency_btn %}
-            <form action="/emergency_sub" method="POST" class="mt-3" onsubmit="return confirm('Blast an emergency sub request to all players?');">
-                <button type="submit" class="btn btn-warning w-100 fw-bold">🚨 Request Emergency Sub</button>
-            </form>
             {% endif %}
         </div>
     </div>
@@ -115,25 +126,16 @@
                     <ul class="list-group list-group-flush">
                     {% for player in roster %}
                         {% if loop.index0 < playing_cutoff %}
-                            {% if loop.index0 % 4 == 0 %}
-                                <li class="list-group-item court-header">
-                                    🎾 Court {{ (loop.index0 // 4) + 1 }}
-                                </li>
-                            {% endif %}
+                            {% if loop.index0 % 4 == 0 %}<li class="list-group-item court-header">🎾 Court {{ (loop.index0 // 4) + 1 }}</li>{% endif %}
                             
                             <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span>{{ loop.index }}. {{ player['First'] }} {{ player['Last'] }}</span>
-                                {% if session.get('user') and session.user.is_admin %}
-                                <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
-                                    <button name="status" value="Played" class="btn btn-sm btn-success py-0 px-1">✓</button>
-                                    <button name="status" value="Late" class="btn btn-sm btn-warning py-0 px-1 fw-bold">L</button>
-                                    <button name="status" value="No-Show" class="btn btn-sm btn-danger py-0 px-1">✗</button>
-                                </form>
-                                {% endif %}
+                                <span>{{ loop.index }}. {{ player['First'] }} {{ player['Last'] }}
+                                    {% if player.get('Label') == 'NEEDS SUB' %}<span class="badge bg-danger ms-2">NEEDS SUB</span>
+                                    {% elif player.get('Label') == 'PENDING SUB' %}<span class="badge bg-warning text-dark ms-2">PENDING SUB</span>
+                                    {% elif player.get('Label') %}<span class="badge bg-success ms-2">{{ player.get('Label') }}</span>{% endif %}
+                                </span>
                             </li>
                         {% endif %}
-                    {% else %}
-                        <li class="list-group-item text-muted text-center">No signups yet.</li>
                     {% endfor %}
                     </ul>
 
@@ -142,15 +144,8 @@
                     <ul class="list-group list-group-flush">
                     {% for player in roster %}
                         {% if loop.index0 >= playing_cutoff %}
-                        <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
-                            <span>WL #{{ loop.index0 - playing_cutoff + 1 }}. {{ player['First'] }} {{ player['Last'] }}</span>
-                            {% if session.get('user') and session.user.is_admin %}
-                            <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
-                                <button name="status" value="Played" class="btn btn-sm btn-success py-0 px-1">✓</button>
-                                <button name="status" value="Late" class="btn btn-sm btn-warning py-0 px-1 fw-bold">L</button>
-                                <button name="status" value="No-Show" class="btn btn-sm btn-danger py-0 px-1">✗</button>
-                            </form>
-                            {% endif %}
+                        <li class="list-group-item text-muted">
+                            WL #{{ loop.index0 - playing_cutoff + 1 }}. {{ player['First'] }} {{ player['Last'] }}
                         </li>
                         {% endif %}
                     {% endfor %}
@@ -162,27 +157,30 @@
 
         {% if session.get('user') %}
         <div class="col-md-6 mb-4">
+            {% if user_on_roster %}
+            <div class="card shadow-sm mb-4 border-info">
+                <div class="card-body">
+                    <h5 class="card-title">Request a Guest</h5>
+                    <form action="/request_guest" method="POST">
+                        <div class="row g-2 mb-2">
+                            <div class="col-6"><input type="text" name="guest_first" class="form-control form-control-sm" placeholder="First Name" required></div>
+                            <div class="col-6"><input type="text" name="guest_last" class="form-control form-control-sm" placeholder="Last Name" required></div>
+                        </div>
+                        <input type="email" name="guest_email" class="form-control form-control-sm mb-2" placeholder="Email" required>
+                        <input type="text" name="guest_phone" class="form-control form-control-sm mb-2" placeholder="Phone" required>
+                        <button type="submit" class="btn btn-sm btn-info w-100">Send Request to Admin</button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h4 class="card-title">Update Your Info</h4>
-                    <form action="/update_profile" method="POST" class="mb-4">
-                        <div class="input-group mb-2">
-                            <input type="email" name="email" value="{{ session.user.email }}" class="form-control" placeholder="Email">
-                        </div>
-                        <div class="input-group mb-2">
-                            <input type="text" name="phone" value="{{ session.user.phone }}" class="form-control" placeholder="Phone">
-                        </div>
-                        <button type="submit" class="btn btn-sm btn-primary w-100">Save Changes</button>
-                    </form>
-
-                    <h4 class="card-title mt-4">Player Directory</h4>
-                    
+                    <h4 class="card-title">Directory</h4>
                     <input type="text" id="dirSearch" class="form-control mb-2" placeholder="Search by name...">
-                    <button id="showMoreBtn" class="btn btn-sm btn-outline-secondary w-100 mb-2">Load Directory (20 at a time)</button>
-                    
+                    <button id="showMoreBtn" class="btn btn-sm btn-outline-secondary w-100 mb-2">Load Directory</button>
                     <div style="max-height: 400px; overflow-y: auto;">
-                        <ul class="list-group list-group-flush text-sm" id="dirList">
-                            </ul>
+                        <ul class="list-group list-group-flush text-sm" id="dirList"></ul>
                     </div>
                 </div>
             </div>
@@ -195,38 +193,18 @@
         <div class="card-header bg-danger text-white fw-bold">⚙️ Admin Dashboard</div>
         <div class="card-body">
             <div class="row">
-                <div class="col-md-6 mb-3">
-                    <h5>Set Date & Time</h5>
-                    <form action="/admin_action" method="POST" class="d-flex mb-3">
-                        <input type="hidden" name="action" value="labels">
-                        <input type="text" name="date" class="form-control me-2" value="{{ target_date }}">
-                        <input type="text" name="time" class="form-control me-2" value="{{ start_time }}">
-                        <button type="submit" class="btn btn-danger">Save</button>
-                    </form>
-                    
-                    <h5>Send Invite</h5>
-                    <form action="/send_invite" method="POST" class="d-flex">
-                        <input type="email" name="invite_email" class="form-control me-2" placeholder="Email address" required>
-                        <button type="submit" class="btn btn-secondary">Send</button>
-                    </form>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <h5>Pending Applicants</h5>
+                <div class="col-md-6">
+                    <h5>Pending Guests</h5>
                     <ul class="list-group mb-3">
-                    {% for a in applicants %}
+                    {% for g in guest_requests %}
                         <li class="list-group-item d-flex justify-content-between align-items-center">
-                            {{ a['fields'].get('First') }} {{ a['fields'].get('Last') }}
-                            <form action="/approve_player/{{ a['id'] }}" method="POST"><button type="submit" class="btn btn-sm btn-success">Approve</button></form>
+                            {{ g['fields'].get('First') }} {{ g['fields'].get('Last') }} (Sponsor: {{ g['fields'].get('Sponsor') }})
+                            <form action="/approve_guest/{{ g['id'] }}" method="POST"><button type="submit" class="btn btn-sm btn-success">Accept</button></form>
                         </li>
                     {% else %}
-                        <li class="list-group-item text-muted">No pending applicants.</li>
+                        <li class="list-group-item text-muted">No pending guests.</li>
                     {% endfor %}
                     </ul>
-
-                    <form action="/admin_action" method="POST" onsubmit="return confirm('WARNING: This wipes all current signups. Continue?');">
-                        <input type="hidden" name="action" value="reset_roster">
-                        <button type="submit" class="btn btn-dark w-100">Force Clear Roster</button>
-                    </form>
                 </div>
             </div>
         </div>
@@ -234,83 +212,6 @@
     {% endif %}
 
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-{% if session.get('user') %}
-<script>
-    // Load airtight JSON payload from Python/Jinja
-    const dirData = [
-        {% for m in master_list %}
-        {% set f = m['fields'] %}
-        {
-            id: "{{ loop.index }}",
-            name: {{ (f.get('First', '') ~ ' ' ~ f.get('Last', '')) | tojson }},
-            email: {{ f.get('Email', '') | tojson }},
-            phone: {{ f.get('Phone', '') | tojson }}
-        }{% if not loop.last %},{% endif %}
-        {% endfor %}
-    ];
-
-    const dirList = document.getElementById('dirList');
-    const dirSearch = document.getElementById('dirSearch');
-    const showMoreBtn = document.getElementById('showMoreBtn');
-    
-    let currentIndex = 0;
-    const chunkSize = 20;
-
-    function renderPlayers(players, append = false) {
-        if (!append) dirList.innerHTML = '';
-        players.forEach(p => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item py-1';
-            // Added Collapse logic for contact info
-            li.innerHTML = `
-                <a data-bs-toggle="collapse" href="#collapse_${p.id}" role="button" aria-expanded="false" class="text-decoration-none fw-bold text-dark d-block">
-                    ${p.name}
-                </a>
-                <div class="collapse" id="collapse_${p.id}">
-                    <div class="mt-2 small text-muted">
-                        <a href="mailto:${p.email}">${p.email}</a> <br>
-                        <a href="tel:${p.phone}">${p.phone}</a>
-                    </div>
-                </div>
-            `;
-            dirList.appendChild(li);
-        });
-    }
-
-    showMoreBtn.addEventListener('click', () => {
-        if (dirSearch.value.trim() !== '') {
-            dirSearch.value = '';
-            currentIndex = 0;
-        }
-        
-        const nextChunk = dirData.slice(currentIndex, currentIndex + chunkSize);
-        renderPlayers(nextChunk, true);
-        currentIndex += chunkSize;
-        
-        if (currentIndex >= dirData.length) {
-            showMoreBtn.style.display = 'none';
-        }
-    });
-
-    dirSearch.addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase();
-        if (query === '') {
-            dirList.innerHTML = '';
-            currentIndex = 0;
-            showMoreBtn.style.display = 'block';
-            showMoreBtn.innerText = 'Load Directory (20 at a time)';
-            return;
-        }
-        
-        // Show instant matches when searching
-        const matches = dirData.filter(p => p.name.toLowerCase().includes(query));
-        renderPlayers(matches, false);
-        showMoreBtn.style.display = 'none';
-    });
-</script>
-{% endif %}
 </body>
 </html>
