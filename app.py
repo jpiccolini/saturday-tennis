@@ -1,9 +1,9 @@
-import os, requests
+import os, requests, smtplib
 from flask import Flask, render_template, request, session, redirect, url_for, flash
 import datetime as dt
 from datetime import timedelta
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
@@ -13,8 +13,8 @@ API_KEY = os.environ.get("AIRTABLE_API_KEY")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
 ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY")
-SG_KEY = os.environ.get("SENDGRID_API_KEY")
-FROM_EMAIL = os.environ.get("FROM_EMAIL")
+FROM_EMAIL = os.environ.get("FROM_EMAIL") 
+GMAIL_PW = os.environ.get("GMAIL_PASSWORD") # Your 16-character App Password
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", FROM_EMAIL) 
 SITE_URL = "https://saturday-tennis.onrender.com"
 
@@ -24,14 +24,34 @@ def log_activity(name, action):
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
                   json={"fields": {"Name": name, "Action": action}})
 
-# UPDATED: Now supports sending to a massive list of emails at once without timing out
+# UPDATED: Replaced SendGrid with Gmail (smtplib). Uses BCC for bulk emails.
 def send_email(to_emails, subject, html_content, is_multiple=False):
-    if not SG_KEY or not FROM_EMAIL or not to_emails: return
-    message = Mail(from_email=FROM_EMAIL, to_emails=to_emails, subject=subject, html_content=html_content, is_multiple=is_multiple)
+    if not FROM_EMAIL or not GMAIL_PW or not to_emails: return
+    
+    if isinstance(to_emails, str): 
+        to_emails = [to_emails]
+        
+    msg = MIMEMultipart()
+    msg['From'] = FROM_EMAIL
+    msg['Subject'] = subject
+    
+    if is_multiple:
+        msg['To'] = FROM_EMAIL # Addressed to self, others BCC'd
+        recipients = to_emails + [FROM_EMAIL]
+    else:
+        msg['To'] = to_emails[0]
+        recipients = to_emails
+        
+    msg.attach(MIMEText(html_content, 'html'))
+    
     try:
-        sg = SendGridAPIClient(SG_KEY)
-        sg.send(message)
-    except Exception as e: print(f"Email Error: {e}")
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(FROM_EMAIL, GMAIL_PW)
+        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
+        server.quit()
+    except Exception as e: 
+        print(f"Email Error: {e}")
 
 def get_airtable_data(table_name, filter_formula=None, sort_field=None, max_records=None, direction="asc"):
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name.replace(' ', '%20')}"
@@ -85,6 +105,10 @@ def index():
             user_on_roster = True
             if i >= 24: waitlist_pos = i - 23
 
+    # UPDATED: Calculate Complete Courts
+    confirmed_players = min(len(roster), 24)
+    complete_courts = confirmed_players // 4
+
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
@@ -99,7 +123,6 @@ def index():
 
     if curr_user:
         master_list = get_airtable_data("Master List", sort_field="First")
-        
         if curr_user.get('is_admin'):
             show_emergency_btn = True
             applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
@@ -112,7 +135,7 @@ def index():
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, master_list=master_list, logs=recent_logs,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info,
-                           show_emergency_btn=show_emergency_btn)
+                           show_emergency_btn=show_emergency_btn, complete_courts=complete_courts)
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -138,7 +161,7 @@ def validate():
         }
         log_activity(name, "Login")
         return redirect(url_for('index'))
-    flash("Invalid Code", "error")
+    flash("Invalid Code", "danger")
     return redirect(url_for('index'))
 
 @app.route('/reset_admin_pw')
@@ -159,8 +182,6 @@ def emergency_sub():
     <p><b>{sender_name}</b> just broadcasted an urgent need for a sub for this Saturday's tennis rotation.</p>
     <p>If you can play, please sign up immediately at <a href='{SITE_URL}'>{SITE_URL}</a> or log in to check the directory and text them directly.</p>
     """
-    
-    # UPDATED: Batch sending for emergencies
     emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
     send_email(emails, subject, body, is_multiple=True)
             
@@ -175,7 +196,7 @@ def send_invite():
     subject = "🎾 Invitation: Saturday Tennis Gang"
     body = f"""<h3>You're invited!</h3>
     <p>Apply to join our Saturday tennis rotation here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
-    <p><b>Important:</b> Our emails often land in SPAM. Please check your junk folder and add {FROM_EMAIL} to your contacts!</p>"""
+    <p><b>Important:</b> Please add {FROM_EMAIL} to your contacts!</p>"""
     send_email(email, subject, body)
     flash(f"Invite sent to {email}", "success")
     return redirect(url_for('index'))
@@ -198,15 +219,11 @@ def approve_player(app_id):
             except ValueError: pass 
     new_code = str(highest_code + 1)
     
-    master_data = {
-        "fields": {"First": first, "Last": last, "Email": email, "Phone": phone, "Code": new_code, "Notes": f.get('Notes', '') },
-        "typecast": True 
-    }
+    master_data = {"fields": {"First": first, "Last": last, "Email": email, "Phone": phone, "Code": new_code, "Notes": f.get('Notes', '')}, "typecast": True}
     m_res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json=master_data)
     
     if m_res.status_code != 200:
-        error_msg = m_res.json().get('error', {}).get('message', 'Unknown Airtable Error')
-        flash(f"Error adding to Master List: {error_msg}", "danger")
+        flash(f"Error adding to Master List.", "danger")
         return redirect(url_for('index'))
 
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, 
@@ -262,18 +279,34 @@ def signup():
     log_activity(f"{session['user']['first']} {session['user']['last']}", "Signed Up")
     return redirect(url_for('index'))
 
+# UPDATED: Enforces Friday 8 AM rule
 @app.route('/cancel', methods=['POST'])
 def cancel():
     if not session.get('user'): return redirect(url_for('index'))
+    
+    now_utc = dt.datetime.utcnow()
+    # 14:00 UTC is 8:00 AM MDT in Colorado
+    is_past_deadline = (now_utc.weekday() == 4 and now_utc.hour >= 14) or (now_utc.weekday() == 5)
+
     recs = get_airtable_data("Signups", sort_field="Created Time")
     idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
+    
     if idx is not None:
+        is_confirmed = idx < 24
+        waitlist_exists = len(recs) > 24
+        
+        if is_confirmed and is_past_deadline and not waitlist_exists:
+            flash("⚠️ It is past Friday 8 AM! You cannot cancel unless someone is on the waitlist to take your spot. Please find a sub and contact Jim.", "danger")
+            return redirect(url_for('index'))
+
         if idx < 24 and len(recs) > 24:
             promo = recs[24]
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{promo['id']}", headers=HEADERS, json={"fields": {"Status": "Confirmed"}})
-            send_email(promo['fields'].get('Email'), "🎾 You're IN!", "A spot opened up. You are confirmed!")
+            send_email(promo['fields'].get('Email'), "🎾 You're IN!", "A spot opened up. You are confirmed!", is_multiple=False)
+            
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS)
         log_activity(f"{session['user']['first']} {session['user']['last']}", "Cancelled")
+        
     return redirect(url_for('index'))
 
 @app.route('/logout')
@@ -286,8 +319,6 @@ def apply():
     flash("Application Submitted!", "success")
     return redirect(url_for('index'))
 
-# --- AUTOMATED CRON JOB ROUTES ---
-
 @app.route('/cron/thursday')
 def cron_thursday():
     return "Thursday cron executed successfully", 200
@@ -299,38 +330,18 @@ def cron_monday():
     
     master_list = get_airtable_data("Master List")
     subject = "🎾 Signups are OPEN for Saturday Tennis!"
-    body = f"""<h3>Happy Monday, Gang!</h3>
-    <p>Signups for this Saturday's tennis rotation are now officially open.</p>
-    <p><b><a href='{SITE_URL}'>Click here to claim your spot or check the roster.</a></b></p>
-    <p><b>Quick Reminders:</b></p>
-    <ul>
-        <li>Only sign up if you know you can make it and arrive on time.</li>
-        <li>If you end up on the waitlist, be sure to check your email Saturday morning!</li>
-        <li><b>Important:</b> Please add <b>jpiccolini@dawsonschool.org</b> to your contacts. Check your Spam folder occasionally, and move emails like this back to your inbox so they stay "on your radar".</li>
-    </ul>
-    <p>See you on the courts,<br>Jim</p>"""
-    
-    # UPDATED: Gather all emails and send in one batch
+    body = f"<h3>Happy Monday, Gang!</h3><p>Signups for this Saturday are open. <a href='{SITE_URL}'>Claim your spot!</a></p>"
     emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
     send_email(emails, subject, body, is_multiple=True)
-            
-    return "Monday cron executed: Roster reset and emails sent", 200
+    return "Monday cron executed", 200
 
 @app.route('/cron/friday')
 def cron_friday():
     master_list = get_airtable_data("Master List")
     subject = "🎾 Tomorrow's Tennis Roster & Reminders"
-    body = f"""<h3>Happy Friday!</h3>
-    <p>We are set for tennis tomorrow. Please check the live roster to confirm your status: <a href='{SITE_URL}'>{SITE_URL}</a></p>
-    <p><b>If you are confirmed:</b> See you tomorrow! If your plans have changed, PLEASE log in and cancel your spot right now so someone on the waitlist can play.</p>
-    <p><b>If you are on the waitlist:</b> Keep an eye on your email tonight and tomorrow morning. If someone drops out, you will receive an automatic email moving you to the confirmed list!</p>
-    <p><b>Important:</b> Please add <b>jpiccolini@dawsonschool.org</b> to your contacts. Check your Spam folder occasionally, and move emails like this back to your inbox so they stay "on your radar".</p>
-    <p>See you tomorrow,<br>Jim</p>"""
-    
-    # UPDATED: Gather all emails and send in one batch
+    body = f"<h3>Happy Friday!</h3><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p>"
     emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
     send_email(emails, subject, body, is_multiple=True)
-            
-    return "Friday cron executed: Reminder emails sent", 200
+    return "Friday cron executed", 200
 
 if __name__ == '__main__': app.run(debug=True)
