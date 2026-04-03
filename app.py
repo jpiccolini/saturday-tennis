@@ -24,10 +24,11 @@ def log_activity(name, action):
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
                   json={"fields": {"Name": name, "Action": action}})
 
+# UPDATED: Now supports sending to a massive list of emails at once without timing out
 def send_email(to_emails, subject, html_content, is_multiple=False):
     if not SG_KEY or not FROM_EMAIL or not to_emails: return
+    message = Mail(from_email=FROM_EMAIL, to_emails=to_emails, subject=subject, html_content=html_content, is_multiple=is_multiple)
     try:
-        message = Mail(from_email=FROM_EMAIL, to_emails=to_emails, subject=subject, html_content=html_content, is_multiple=is_multiple)
         sg = SendGridAPIClient(SG_KEY)
         sg.send(message)
     except Exception as e: print(f"Email Error: {e}")
@@ -99,14 +100,12 @@ def index():
     if curr_user:
         master_list = get_airtable_data("Master List", sort_field="First")
         
-        # Check Emergency Button Logic (Admin = Always. Player = Saturday >= 6AM MT)
         if curr_user.get('is_admin'):
             show_emergency_btn = True
             applicants = [a for a in get_airtable_data("Applicants") if a['fields'].get('Status') == 'Pending']
             recent_logs = get_airtable_data("Logs", sort_field="Timestamp", direction="desc", max_records=10)
         else:
             now_utc = dt.datetime.utcnow()
-            # 5 == Saturday. 12 UTC is 6 AM MDT / 5 AM MST
             if now_utc.weekday() == 5 and now_utc.hour >= 12:
                 show_emergency_btn = True
 
@@ -161,10 +160,9 @@ def emergency_sub():
     <p>If you can play, please sign up immediately at <a href='{SITE_URL}'>{SITE_URL}</a> or log in to check the directory and text them directly.</p>
     """
     
-    for m in master_list:
-        email = m['fields'].get('Email')
-        if email:
-            send_email(email, subject, body)
+    # UPDATED: Batch sending for emergencies
+    emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+    send_email(emails, subject, body, is_multiple=True)
             
     log_activity(sender_name, "Broadcasted Emergency Sub")
     flash("Emergency sub broadcast sent to all players!", "success")
@@ -312,11 +310,11 @@ def cron_monday():
     </ul>
     <p>See you on the courts,<br>Jim</p>"""
     
-    # Gather all emails into a list and send at once
+    # UPDATED: Gather all emails and send in one batch
     emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
     send_email(emails, subject, body, is_multiple=True)
             
-    return "Monday cron executed: Roster reset and batch emails sent", 200
+    return "Monday cron executed: Roster reset and emails sent", 200
 
 @app.route('/cron/friday')
 def cron_friday():
@@ -329,9 +327,10 @@ def cron_friday():
     <p><b>Important:</b> Please add <b>jpiccolini@dawsonschool.org</b> to your contacts. Check your Spam folder occasionally, and move emails like this back to your inbox so they stay "on your radar".</p>
     <p>See you tomorrow,<br>Jim</p>"""
     
-    # Gather all emails into a list and send at once
+    # UPDATED: Gather all emails and send in one batch
     emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
     send_email(emails, subject, body, is_multiple=True)
             
-    return "Friday cron executed: Batch reminder emails sent", 200
+    return "Friday cron executed: Reminder emails sent", 200
+
 if __name__ == '__main__': app.run(debug=True)
