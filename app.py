@@ -118,10 +118,12 @@ def index():
             if str(p.get('Sub Offer')) == str(curr_user.get('code')):
                 pending_sub_offer = True
 
-    now_utc = dt.datetime.utcnow()
-    is_past_deadline = (now_utc.weekday() == 4 and now_utc.hour >= 14) or (now_utc.weekday() == 5)
+    # Adjust to MDT for accurate day calculations
+    now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
+    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 14) or (now_mdt.weekday() == 5)
+    is_saturday = (now_mdt.weekday() == 5)
 
-    # 5. Weather (Updated with explicit start and end times)
+    # 5. Weather
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
@@ -144,29 +146,24 @@ def index():
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, guest_requests=guest_requests, master_list=master_recs, logs=recent_logs,
                            user_on_roster=user_on_roster, user_status=user_status, waitlist_pos=waitlist_pos, weather=weather_info,
-                           playing_cutoff=playing_cutoff, pending_sub_offer=pending_sub_offer, is_past_deadline=is_past_deadline)
+                           playing_cutoff=playing_cutoff, pending_sub_offer=pending_sub_offer, 
+                           is_past_deadline=is_past_deadline, is_saturday=is_saturday)
 
 @app.route('/validate', methods=['POST'])
 def validate():
     code = str(request.form.get('code', '')).strip()
     password = request.form.get('password')
-    
     recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code}'")
     if recs:
         f = recs[0]['fields']
         session['user'] = {
-            'id': recs[0]['id'], 
-            'first': f.get('First'), 
-            'last': f.get('Last'), 
-            'code': code, 
-            'is_admin': (password == ADMIN_PW),
-            'email': f.get('Email', ''), 
-            'phone': f.get('Phone', '')
+            'id': recs[0]['id'], 'first': f.get('First'), 'last': f.get('Last'), 
+            'code': code, 'is_admin': (password == ADMIN_PW),
+            'email': f.get('Email', ''), 'phone': f.get('Phone', '')
         }
         log_activity(f"{f.get('First')} {f.get('Last')}", "Login")
         return redirect(url_for('index'))
-    flash("Invalid Code", "danger")
-    return redirect(url_for('index'))
+    flash("Invalid Code", "danger"); return redirect(url_for('index'))
 
 @app.route('/signup', methods=['POST'])
 def signup():
@@ -183,8 +180,8 @@ def signup():
 @app.route('/cancel', methods=['POST'])
 def cancel():
     if not session.get('user'): return redirect(url_for('index'))
-    now_utc = dt.datetime.utcnow()
-    is_past_deadline = (now_utc.weekday() == 4 and now_utc.hour >= 14) or (now_utc.weekday() == 5)
+    now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
+    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 14) or (now_mdt.weekday() == 5)
     recs = get_airtable_data("Signups", sort_field="Created Time")
     
     idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
@@ -268,12 +265,37 @@ def approve_guest(app_id):
     flash(f"Guest added to roster!", "success")
     return redirect(url_for('index'))
 
+@app.route('/info_blast', methods=['POST'])
+def info_blast():
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    
+    target = request.form.get('target_group')
+    message = request.form.get('message')
+    master_list = get_airtable_data("Master List")
+    
+    emails = []
+    if target == 'roster':
+        signups = get_airtable_data("Signups")
+        roster_codes = [str(s['fields'].get('Player Code')) for s in signups]
+        emails = [m['fields'].get('Email') for m in master_list if str(m['fields'].get('Code')) in roster_codes and m['fields'].get('Email')]
+    else:
+        emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+        
+    if emails:
+        body = f"<h3>🎾 Update from Jim:</h3><p>{message}</p><p><small><a href='{SITE_URL}'>Check the roster here.</a></small></p>"
+        send_email(emails, "Saturday Tennis Update", body, is_multiple=True)
+        flash(f"Info Blast successfully sent to {len(emails)} players!", "success")
+    else:
+        flash("No valid emails found to send to.", "danger")
+        
+    return redirect(url_for('index'))
+
 @app.route('/emergency_sub', methods=['POST'])
 def emergency_sub():
     if not session.get('user'): return redirect(url_for('index'))
     master_list = get_airtable_data("Master List")
     emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
-    send_email(emails, "🚨 URGENT: Tennis Sub Needed!", f"<p><b>{session['user']['first']} {session['user']['last']}</b> needs an emergency sub immediately. Log in to claim the spot!</p>", is_multiple=True)
+    send_email(emails, "🚨 URGENT: Tennis Sub Needed!", f"<p><b>{session['user']['first']} {session['user']['last']}</b> needs an emergency sub immediately. Log in to <a href='{SITE_URL}'>claim the spot!</a></p>", is_multiple=True)
     flash("Emergency sub broadcast sent!", "success")
     return redirect(url_for('index'))
 
