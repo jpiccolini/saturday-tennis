@@ -74,7 +74,6 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None, directio
 
 @app.route('/')
 def index():
-    # 1. Fetch Settings
     settings = get_airtable_data("Settings")
     d_date, d_start, d_end = "TBD", "TBD", ""
     if settings:
@@ -85,11 +84,9 @@ def index():
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
         except: pass
 
-    # 2. Fetch Master List for Strike/Paused Status
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
 
-    # 3. Fetch Roster & Sort by Penalties
     signup_recs = get_airtable_data("Signups", sort_field="Created Time")
     normal_signups, penalized_signups = [], []
     for r in signup_recs:
@@ -104,7 +101,6 @@ def index():
         f['strikes'] = strike_map.get(str(f.get('Player Code')), 0)
         roster.append(f)
 
-    # 4. Math & State Variables
     playing_cutoff = (min(len(roster), 24) // 4) * 4
     user_on_roster, waitlist_pos, user_status, pending_sub_offer = False, 0, None, False
     curr_user = session.get('user')
@@ -118,12 +114,10 @@ def index():
             if str(p.get('Sub Offer')) == str(curr_user.get('code')):
                 pending_sub_offer = True
 
-    # Adjust to MDT for accurate day calculations
     now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
-    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 14) or (now_mdt.weekday() == 5)
+    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 8) or (now_mdt.weekday() == 5)
     is_saturday = (now_mdt.weekday() == 5)
 
-    # 5. Weather
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
@@ -135,7 +129,6 @@ def index():
             weather_info = f"{cond} | 8:00 AM: {temp_8}°F → 11:00 AM: {temp_11}°F"
     except: pass
 
-    # 6. Admin Data
     applicants, guest_requests, recent_logs = [], [], []
     if curr_user and curr_user.get('is_admin'):
         all_apps = get_airtable_data("Applicants")
@@ -181,7 +174,7 @@ def signup():
 def cancel():
     if not session.get('user'): return redirect(url_for('index'))
     now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
-    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 14) or (now_mdt.weekday() == 5)
+    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 8) or (now_mdt.weekday() == 5)
     recs = get_airtable_data("Signups", sort_field="Created Time")
     
     idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
@@ -194,10 +187,19 @@ def cancel():
             if waitlist_exists:
                 promo = recs[playing_cutoff]
                 promo_code = promo['fields'].get('Player Code')
+                
+                # Fetch email from Master List
+                promo_email = None
+                m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{promo_code}'")
+                if m_recs: promo_email = m_recs[0]['fields'].get('Email')
+
                 requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS, 
                                json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
-                send_email(promo['fields'].get('Email'), "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
-                flash("Drop initiated. The first waitlisted player has been emailed.", "warning")
+                if promo_email:
+                    send_email(promo_email, "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
+                    flash("Drop initiated. The first waitlisted player has been emailed.", "warning")
+                else:
+                    flash("Drop initiated, but the waitlisted player has no email on file! Contact them manually.", "warning")
             else:
                 requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS, 
                                json={"fields": {"Label": "NEEDS SUB"}})
@@ -268,7 +270,6 @@ def approve_guest(app_id):
 @app.route('/info_blast', methods=['POST'])
 def info_blast():
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    
     target = request.form.get('target_group')
     message = request.form.get('message')
     master_list = get_airtable_data("Master List")
@@ -287,7 +288,6 @@ def info_blast():
         flash(f"Info Blast successfully sent to {len(emails)} players!", "success")
     else:
         flash("No valid emails found to send to.", "danger")
-        
     return redirect(url_for('index'))
 
 @app.route('/emergency_sub', methods=['POST'])
