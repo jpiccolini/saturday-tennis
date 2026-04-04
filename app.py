@@ -88,7 +88,6 @@ def index():
     # 2. Fetch Master List for Strike/Paused Status
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
-    paused_map = {str(m['fields'].get('Code')): m['fields'].get('Paused', False) for m in master_recs}
 
     # 3. Fetch Roster & Sort by Penalties
     signup_recs = get_airtable_data("Signups", sort_field="Created Time")
@@ -122,12 +121,16 @@ def index():
     now_utc = dt.datetime.utcnow()
     is_past_deadline = (now_utc.weekday() == 4 and now_utc.hour >= 14) or (now_utc.weekday() == 5)
 
-    # 5. Weather
+    # 5. Weather (Updated with explicit start and end times)
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
         sat = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
-        if sat: weather_info = f"Sat: {sat['hour'][8]['condition']['text']} | {int(sat['hour'][8]['temp_f'])}°F"
+        if sat: 
+            cond = sat['hour'][8]['condition']['text']
+            temp_8 = int(sat['hour'][8]['temp_f'])
+            temp_11 = int(sat['hour'][11]['temp_f'])
+            weather_info = f"{cond} | 8:00 AM: {temp_8}°F → 11:00 AM: {temp_11}°F"
     except: pass
 
     # 6. Admin Data
@@ -168,12 +171,10 @@ def validate():
 @app.route('/signup', methods=['POST'])
 def signup():
     if not session.get('user'): return redirect(url_for('index'))
-    
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{session['user']['code']}'")
     if m_recs and m_recs[0]['fields'].get('Paused'):
         flash("🚫 Your account is paused due to strikes. Please contact Jim.", "danger")
         return redirect(url_for('index'))
-    
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, 
                   json={"fields": {"First": session['user']['first'], "Last": session['user']['last'], "Player Code": str(session['user']['code'])}})
     log_activity(f"{session['user']['first']} {session['user']['last']}", "Signed Up")
@@ -199,11 +200,11 @@ def cancel():
                 requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS, 
                                json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
                 send_email(promo['fields'].get('Email'), "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
-                flash("Drop initiated. The first waitlisted player has been emailed to accept your spot.", "warning")
+                flash("Drop initiated. The first waitlisted player has been emailed.", "warning")
             else:
                 requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS, 
                                json={"fields": {"Label": "NEEDS SUB"}})
-                flash("⚠️ NO ONE is on the waitlist. You are marked NEEDS SUB. Find a sub and enter their info.", "danger")
+                flash("⚠️ NO ONE is on the waitlist. You are marked NEEDS SUB. Find a sub.", "danger")
             return redirect(url_for('index'))
 
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS)
@@ -216,12 +217,10 @@ def accept_sub():
     recs = get_airtable_data("Signups")
     dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(session['user']['code'])), None)
     me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
-    
     if dropper and me:
         dropper_name = dropper['fields'].get('First')
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{dropper['id']}", headers=HEADERS)
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, 
-                       json={"fields": {"Label": f"SUB for {dropper_name}"}})
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, json={"fields": {"Label": f"SUB for {dropper_name}"}})
         flash("You successfully accepted the sub spot!", "success")
     return redirect(url_for('index'))
 
@@ -231,10 +230,8 @@ def provide_sub():
     sub_first, sub_last, sub_email = request.form.get('sub_first'), request.form.get('sub_last'), request.form.get('sub_email')
     recs = get_airtable_data("Signups")
     me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
-    
     if me:
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, 
-                       json={"fields": {"First": sub_first, "Last": sub_last, "Label": f"SUB for {session['user']['first']}"}})
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, json={"fields": {"First": sub_first, "Last": sub_last, "Label": f"SUB for {session['user']['first']}"}})
         send_email([sub_email, session['user']['email'], ADMIN_EMAIL], "🎾 Tennis Sub Confirmed", f"<p>You are confirmed to sub for {session['user']['first']}!</p>", is_multiple=False)
         flash("Sub confirmed and added to the roster.", "success")
     return redirect(url_for('index'))
@@ -244,15 +241,11 @@ def attendance(code_val):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     status, note = request.form.get('status'), request.form.get('note', '')
     strike_inc = 1 if status == 'Late' else 2 if status == 'No Show' else 0
-    
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code_val}'")
     if m_recs:
         new_strikes = m_recs[0]['fields'].get('Strikes', 0) + strike_inc
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, 
-                       json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
-    
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, 
-                  json={"fields": {"Player Code": str(code_val), "Attendance": status, "Notes": note, "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_val), "Attendance": status, "Notes": note, "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
     flash(f"Recorded {status} for {code_val}.", "info")
     return redirect(url_for('index'))
 
@@ -297,7 +290,6 @@ def approve_player(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
     res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
     f = res.get('fields', {})
-    
     m_list = get_airtable_data("Master List")
     highest_code = 1000
     for m in m_list:
@@ -308,7 +300,6 @@ def approve_player(app_id):
                 if highest_code < num < 9000: highest_code = num
             except ValueError: pass 
     new_code = str(highest_code + 1)
-    
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json={"fields": {"First": f.get('First'), "Last": f.get('Last'), "Email": f.get('Email'), "Phone": f.get('Phone', ''), "Code": new_code}, "typecast": True})
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved", "Assigned Code": new_code}, "typecast": True})
     send_email(f.get('Email'), "🎾 Welcome to the Gang!", f"<p>Your application is approved. Login code: <b>{new_code}</b></p>")
@@ -332,11 +323,14 @@ def admin_action():
     if action == 'labels':
         recs = get_airtable_data("Settings")
         if recs: requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{recs[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
+        flash("Date and time updated!", "success")
     elif action == 'reset_roster':
         for r in get_airtable_data("Signups"): requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+        flash("Roster cleared!", "success")
     elif action == 'player_update':
         pid, note = request.form.get('player_id'), request.form.get('note')
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{pid}", headers=HEADERS, json={"fields": {"Notes": note}})
+        flash("Admin note saved.", "success")
     return redirect(url_for('index'))
 
 @app.route('/apply', methods=['POST'])
