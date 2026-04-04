@@ -101,7 +101,11 @@ def index():
         f['strikes'] = strike_map.get(str(f.get('Player Code')), 0)
         roster.append(f)
 
-    playing_cutoff = (min(len(roster), 24) // 4) * 4
+    # Calculate Math for Waitlists & Courts
+    total_signups = len(roster)
+    playing_cutoff = (min(total_signups, 24) // 4) * 4
+    waitlist_count = total_signups - playing_cutoff
+
     user_on_roster, waitlist_pos, user_status, pending_sub_offer = False, 0, None, False
     curr_user = session.get('user')
 
@@ -139,8 +143,8 @@ def index():
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster, 
                            applicants=applicants, guest_requests=guest_requests, master_list=master_recs, logs=recent_logs,
                            user_on_roster=user_on_roster, user_status=user_status, waitlist_pos=waitlist_pos, weather=weather_info,
-                           playing_cutoff=playing_cutoff, pending_sub_offer=pending_sub_offer, 
-                           is_past_deadline=is_past_deadline, is_saturday=is_saturday)
+                           playing_cutoff=playing_cutoff, total_signups=total_signups, waitlist_count=waitlist_count, 
+                           pending_sub_offer=pending_sub_offer, is_past_deadline=is_past_deadline, is_saturday=is_saturday)
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -188,7 +192,6 @@ def cancel():
                 promo = recs[playing_cutoff]
                 promo_code = promo['fields'].get('Player Code')
                 
-                # Fetch email from Master List
                 promo_email = None
                 m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{promo_code}'")
                 if m_recs: promo_email = m_recs[0]['fields'].get('Email')
@@ -372,15 +375,4 @@ def cron_thursday(): return "Executed", 200
 @app.route('/cron/monday')
 def cron_monday():
     for r in get_airtable_data("Signups"): requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-    emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-    send_email(emails, "🎾 Signups are OPEN!", f"<p>Signups for this Saturday are open. <a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
-    return "Executed", 200
-
-@app.route('/cron/friday')
-def cron_friday():
-    emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-    send_email(emails, "🎾 Tomorrow's Tennis Roster & Reminders", f"<p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
-    return "Executed", 200
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    emails = [m['fields'].get('Email') for m in
