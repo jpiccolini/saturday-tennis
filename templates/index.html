@@ -42,11 +42,21 @@
                             <a href="/logout" class="btn btn-sm btn-light">Logout</a>
                         </div>
                         <div class="card-body">
+                            
                             {% if session.user.get('is_admin') %}
-                                <div class="p-2 border rounded bg-light mb-3">
-                                    <p class="text-primary fw-bold mb-0">ADMIN DASHBOARD</p>
-                                    <small class="text-muted">Direct control active</small>
+                                <div class="p-3 border rounded bg-light mb-3 text-start">
+                                    <p class="text-primary fw-bold text-center border-bottom pb-2">ADMIN DASHBOARD</p>
+                                    <h6 class="text-secondary mt-2">📣 Quick Info Blast</h6>
+                                    <form action="/info_blast" method="POST">
+                                        <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Write message to send via email..." required></textarea>
+                                        <select name="target_group" class="form-select form-select-sm mb-2">
+                                            <option value="roster">Current Roster Only (Signed up)</option>
+                                            <option value="master">Entire Master List</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-primary w-100 fw-bold">Send Blast Now</button>
+                                    </form>
                                 </div>
+                                
                             {% elif user_on_roster %}
                                 <div class="alert alert-success">You are on the list!</div>
                                 <form action="/cancel" method="POST">
@@ -59,6 +69,19 @@
                             {% endif %}
                         </div>
                     </div>
+
+                    {% if session.user.get('is_admin') or is_saturday %}
+                    <div class="card shadow border-danger mb-4">
+                        <div class="card-body text-center">
+                            <h5 class="text-danger">🚨 Emergency Sub Required?</h5>
+                            <p class="small text-muted mb-2">Instantly email the entire master list asking for someone to fill your spot.</p>
+                            <form action="/emergency_sub" method="POST" onsubmit="return confirm('WARNING: This will email ALL players. Are you sure?');">
+                                <button type="submit" class="btn btn-danger fw-bold w-100">Broadcast Emergency Sub</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
                 {% else %}
                     <div class="card shadow mb-4">
                         <div class="card-header bg-primary text-white"><h5>Player Login</h5></div>
@@ -132,10 +155,9 @@
                 {% if session.get('user') and session.user.get('is_admin') %}
                 <div class="card shadow border-danger mb-4">
                     <div class="card-header bg-danger text-white">
-                        <h5 class="mb-0">⚙️ Admin Control Panel</h5>
+                        <h5 class="mb-0">⚙️ Settings & Approvals</h5>
                     </div>
                     <div class="card-body">
-                        
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <h6 class="text-primary border-bottom pb-1">Pending Players</h6>
@@ -195,7 +217,6 @@
                             <input type="hidden" name="action" value="reset_roster">
                             <button class="btn btn-danger w-100 fw-bold">CLEAR ROSTER & RESET</button>
                         </form>
-
                     </div>
                 </div>
                 {% endif %}
@@ -206,11 +227,11 @@
         {% if session.get('user') %}
         <div class="card mt-2 shadow border-0 mb-5">
             <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#dirCollapse">
-                <h5 class="mb-0">Club Directory 🔽</h5>
+                <h5 class="mb-0">Club Directory 🔽 <small class="fw-normal fs-6 text-light ms-2">(Click to expand)</small></h5>
                 {% if session.user.get('is_admin') %}<span class="badge bg-warning text-dark">Admin View</span>{% endif %}
             </div>
             
-            <div id="dirCollapse" class="collapse {% if not (session.get('user') and session.user.get('is_admin')) %}show{% endif %}">
+            <div id="dirCollapse" class="collapse">
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
