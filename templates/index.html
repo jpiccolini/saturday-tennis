@@ -21,7 +21,13 @@
             <h1 class="display-5 fw-bold text-success">🎾 Saturday Tennis Gang</h1>
             <h3 class="text-secondary">@ Dawson School</h3>
             <p class="lead mb-1"><strong>{{ target_date }}</strong> | {{ start_time }}{{ end_time }}</p>
-            <span class="badge bg-info text-dark shadow-sm fs-5">{{ weather }}</span>
+            <span class="badge bg-info text-dark shadow-sm fs-5 mb-2">{{ weather }}</span>
+            
+            <div>
+                <span class="badge bg-success fs-6 me-1">{{ playing_cutoff }} Playing</span>
+                <span class="badge bg-warning text-dark fs-6 me-1">{{ waitlist_count }} Waitlisted</span>
+                <span class="badge bg-secondary fs-6">{{ total_signups }} Total</span>
+            </div>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -112,9 +118,14 @@
                     
                     <div id="rosterCollapse" class="collapse {% if not (session.get('user') and session.user.get('is_admin')) %}show{% endif %}">
                         <div class="card-body p-2" style="background-color: #eee;">
+                            
                             {% for player in roster %}
-                                {% if loop.index0 == playing_cutoff and loop.index0 > 0 %}
-                                    <div class="text-center my-3"><span class="badge bg-warning text-dark px-4 py-2">--- WAITLIST BELOW ---</span></div>
+                                {% if loop.index0 % 4 == 0 %}
+                                    {% if loop.index0 < playing_cutoff %}
+                                        <h6 class="mt-3 mb-2 text-success fw-bold border-bottom border-success pb-1">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
+                                    {% elif loop.index0 == playing_cutoff %}
+                                        <h6 class="mt-4 mb-2 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist (Incomplete Group)</h6>
+                                    {% endif %}
                                 {% endif %}
 
                                 <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
