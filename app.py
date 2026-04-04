@@ -375,4 +375,15 @@ def cron_thursday(): return "Executed", 200
 @app.route('/cron/monday')
 def cron_monday():
     for r in get_airtable_data("Signups"): requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-    emails = [m['fields'].get('Email') for m in
+    emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
+    send_email(emails, "🎾 Signups are OPEN!", f"<p>Signups for this Saturday are open. <a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+    return "Executed", 200
+
+@app.route('/cron/friday')
+def cron_friday():
+    emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
+    send_email(emails, "🎾 Tomorrow's Tennis Roster & Reminders", f"<p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+    return "Executed", 200
+
+if __name__ == '__main__':
+    app.run(debug=True)
