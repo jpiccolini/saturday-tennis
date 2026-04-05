@@ -63,15 +63,30 @@
                                     </form>
                                 </div>
                                 
-                            {% elif user_on_roster %}
-                                <div class="alert alert-success">You are on the list!</div>
-                                <form action="/cancel" method="POST">
-                                    <button class="btn btn-outline-danger w-100">Cancel My Spot</button>
-                                </form>
                             {% else %}
-                                <form action="/signup" method="POST">
-                                    <button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button>
-                                </form>
+                                {% if pending_sub_offer %}
+                                    <div class="alert alert-warning text-center border-warning shadow-sm mb-3">
+                                        <h5 class="text-dark mb-1">🎾 Sub Spot Available!</h5>
+                                        <p class="small text-dark mb-2">Someone dropped. Claim their spot!</p>
+                                        <form action="/accept_sub" method="POST">
+                                            <button type="submit" class="btn btn-success fw-bold w-100 shadow-sm">Accept Sub Spot</button>
+                                        </form>
+                                    </div>
+                                {% endif %}
+
+                                {% if user_on_roster %}
+                                    <div class="alert alert-success">
+                                        You are on the list! 
+                                        {% if waitlist_pos > 0 %}<br><small>(Waitlist #{{ waitlist_pos }})</small>{% endif %}
+                                    </div>
+                                    <form action="/cancel" method="POST">
+                                        <button class="btn btn-outline-danger w-100">Cancel My Spot</button>
+                                    </form>
+                                {% else %}
+                                    <form action="/signup" method="POST">
+                                        <button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button>
+                                    </form>
+                                {% endif %}
                             {% endif %}
                         </div>
                     </div>
@@ -131,6 +146,11 @@
                                 <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
                                     <div>
                                         <span class="fw-bold">{{ loop.index }}. {{ player.First }} {{ player.Last }}</span>
+                                        
+                                        {% if player.Label %}
+                                            <span class="badge bg-warning text-dark ms-2">{{ player.Label }}</span>
+                                        {% endif %}
+
                                         {% if session.get('user') and session.user.get('is_admin') and player.strikes > 0 %}
                                             <span class="badge bg-dark ms-1 admin-badge">{{ player.strikes }} ⚠️</span>
                                         {% endif %}
