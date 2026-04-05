@@ -103,7 +103,7 @@ def index():
 
     # Calculate Math for Waitlists & Courts
     total_signups = len(roster)
-    playing_cutoff = (min(total_signups, 24) // 4) * 4
+    playing_cutoff = (min(total_signups, 4) // 4) * 4
     waitlist_count = total_signups - playing_cutoff
 
     user_on_roster, waitlist_pos, user_status, pending_sub_offer = False, 0, None, False
@@ -183,7 +183,7 @@ def cancel():
     
     idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
     if idx is not None:
-        playing_cutoff = (min(len(recs), 24) // 4) * 4
+        playing_cutoff = (min(len(recs), 4) // 4) * 4
         is_in_complete_court = idx < playing_cutoff
         waitlist_exists = len(recs) > playing_cutoff
         
