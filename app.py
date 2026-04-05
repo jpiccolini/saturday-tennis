@@ -76,6 +76,7 @@ def get_airtable_data(table_name, filter_formula=None, sort_field=None, directio
 def index():
     settings = get_airtable_data("Settings")
     d_date, d_start, d_end = "TBD", "TBD", ""
+    start_dt = None
     if settings:
         f = settings[0]['fields']
         d_date, d_start = f.get('Target Date', 'TBD'), f.get('Start Time', 'TBD')
@@ -124,13 +125,34 @@ def index():
 
     weather_info = "Weather Unavailable"
     try:
-        w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=7").json()
-        sat = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
-        if sat: 
-            cond = sat['hour'][8]['condition']['text']
-            temp_8 = int(sat['hour'][8]['temp_f'])
-            temp_11 = int(sat['hour'][11]['temp_f'])
-            weather_info = f"{cond} | 8:00 AM: {temp_8}°F → 11:00 AM: {temp_11}°F"
+        w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=8").json()
+        
+        target_day = None
+        # 1. Try to match the exact date you typed in (e.g., "Apr 11" or "April 11")
+        for d in w_res['forecast']['forecastday']:
+            api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
+            d1, d2 = api_dt.strftime('%b %d'), api_dt.strftime('%b %d').replace(' 0', ' ')
+            d3, d4 = api_dt.strftime('%B %d'), api_dt.strftime('%B %d').replace(' 0', ' ')
+            
+            if d_date in [d1, d2, d3, d4]:
+                target_day = d
+                break
+        
+        # 2. Fallback: if it can't match your text, default to the next Saturday
+        if not target_day:
+            target_day = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
+
+        # 3. Grab temperatures based on the exact start time you entered!
+        if target_day and start_dt: 
+            s_hour = start_dt.hour
+            e_hour = min(s_hour + 2, 23) # Check 2 hours later
+            
+            cond = target_day['hour'][s_hour]['condition']['text']
+            temp_start = int(target_day['hour'][s_hour]['temp_f'])
+            temp_end = int(target_day['hour'][e_hour]['temp_f'])
+            
+            end_time_label = (start_dt + dt.timedelta(hours=2)).strftime('%I:%M %p').lstrip('0')
+            weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_time_label}: {temp_end}°F"
     except: pass
 
     applicants, guest_requests, recent_logs = [], [], []
