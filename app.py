@@ -372,8 +372,28 @@ def admin_action():
         if recs: requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{recs[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
         flash("Date and time updated!", "success")
     elif action == 'reset_roster':
-        for r in get_airtable_data("Signups"): requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-        flash("Roster cleared!", "success")
+        signups = get_airtable_data("Signups")
+        settings = get_airtable_data("Settings")
+        current_date = settings[0]['fields'].get('Target Date', 'Unknown') if settings else 'Unknown'
+        
+        for r in signups:
+            # 1. Archive the data first
+            archive_payload = {
+                "fields": {
+                    "First": r['fields'].get('First', ''),
+                    "Last": r['fields'].get('Last', ''),
+                    "Player Code": str(r['fields'].get('Player Code', '')),
+                    "Attendance": r['fields'].get('Label', 'Signed Up'), # Or "Played" if you manually marked it
+                    "Date": current_date,
+                    "Notes": r['fields'].get('Sub Offer', '') # Handy to see if they offered a sub spot
+                }
+            }
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
+            
+            # 2. Now delete from Signups
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+            
+        flash("Roster successfully archived and cleared!", "success")
     elif action == 'player_update':
         pid, note = request.form.get('player_id'), request.form.get('note')
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{pid}", headers=HEADERS, json={"fields": {"Notes": note}})
@@ -397,29 +417,40 @@ def cron_thursday():
 
 @app.route('/cron/monday')
 def cron_monday():
-    # 1. Clear the roster
-    for r in get_airtable_data("Signups"): 
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-    
-    # 2. Fetch the current date and time from Settings
+    # Fetch Settings early so we can use the date for BOTH archiving and the email
+    signups = get_airtable_data("Signups")
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'Next Session') if settings else 'Next Session'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     
-    # 3. Build email list and customized message
+    # 1. Archive and Clear the roster
+    for r in signups:
+        archive_payload = {
+            "fields": {
+                "First": r['fields'].get('First', ''),
+                "Last": r['fields'].get('Last', ''),
+                "Player Code": str(r['fields'].get('Player Code', '')),
+                "Attendance": r['fields'].get('Label', 'Signed Up'),
+                "Date": d_date
+            }
+        }
+        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
+        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+
+    # 2. Build email list and customized message
     emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
     subject = f"🎾 Signups are OPEN for {d_date}!"
     body = f"""
     <p>Happy Monday! Signups for our next tennis session are officially open.</p>
     <p>
-        Note the date and time are back to our normal spring schedule:
+        Note the date and time are back to our normal spring schedule:<br>
         <strong>Date:</strong> {d_date}<br>
         <strong>Time:</strong> {d_start}
     </p>
     <p><a href='{SITE_URL}'>Click here to claim your spot!</a></p>
     """
     
-    # 4. Send
+    # 3. Send
     send_email(emails, subject, body, is_multiple=True)
     return "Executed", 200
 
