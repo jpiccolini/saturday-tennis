@@ -392,19 +392,58 @@ def logout():
     return redirect(url_for('index'))
 
 @app.route('/cron/thursday')
-def cron_thursday(): return "Executed", 200
+def cron_thursday(): 
+    return "Executed", 200
 
 @app.route('/cron/monday')
 def cron_monday():
-    for r in get_airtable_data("Signups"): requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+    # 1. Clear the roster
+    for r in get_airtable_data("Signups"): 
+        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+    
+    # 2. Fetch the current date and time from Settings
+    settings = get_airtable_data("Settings")
+    d_date = settings[0]['fields'].get('Target Date', 'Next Session') if settings else 'Next Session'
+    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
+    
+    # 3. Build email list and customized message
     emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-    send_email(emails, "🎾 Signups are OPEN!", f"<p>Signups for this Saturday are open. <a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+    subject = f"🎾 Signups are OPEN for {d_date}!"
+    body = f"""
+    <p>Happy Monday! Signups for our next tennis session are officially open.</p>
+    <p>
+        Note the date and time are back to our normal spring schedule:
+        <strong>Date:</strong> {d_date}<br>
+        <strong>Time:</strong> {d_start}
+    </p>
+    <p><a href='{SITE_URL}'>Click here to claim your spot!</a></p>
+    """
+    
+    # 4. Send
+    send_email(emails, subject, body, is_multiple=True)
     return "Executed", 200
 
 @app.route('/cron/friday')
 def cron_friday():
+    # 1. Fetch the current date and time from Settings
+    settings = get_airtable_data("Settings")
+    d_date = settings[0]['fields'].get('Target Date', 'Tomorrow') if settings else 'Tomorrow'
+    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
+
+    # 2. Build email list and customized message
     emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-    send_email(emails, "🎾 Tomorrow's Tennis Roster & Reminders", f"<p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+    subject = f"🎾 Tennis Roster & Reminders for {d_date}"
+    body = f"""
+    <p>Here is your quick reminder for upcoming tennis!</p>
+    <p>
+        <strong>Date:</strong> {d_date}<br>
+        <strong>Time:</strong> {d_start}
+    </p>
+    <p>Check the final live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p>
+    """
+    
+    # 3. Send
+    send_email(emails, subject, body, is_multiple=True)
     return "Executed", 200
 
 if __name__ == '__main__':
