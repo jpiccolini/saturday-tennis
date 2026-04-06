@@ -45,8 +45,36 @@
                     <div class="card shadow border-success mb-4 text-center">
                         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">{{ session.user.get('first', 'Player') }}</h5>
-                            <a href="/logout" class="btn btn-sm btn-light">Logout</a>
+                            <div>
+                                <button class="btn btn-sm btn-outline-light me-1" data-bs-toggle="modal" data-bs-target="#profileModal">⚙️ Profile</button>
+                                <a href="/logout" class="btn btn-sm btn-light">Logout</a>
+                            </div>
                         </div>
+                        
+                        <div class="modal fade" id="profileModal" tabindex="-1">
+                            <div class="modal-dialog">
+                                <form action="/update_profile" method="POST" class="modal-content text-dark">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Update Contact Info</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body text-start">
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-bold">Email</label>
+                                            <input type="email" name="email" class="form-control" value="{{ session.user.get('email', '') }}" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-bold">Phone</label>
+                                            <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}">
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="submit" class="btn btn-success">Save Changes</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
                         <div class="card-body">
                             
                             {% if session.user.get('is_admin') %}
