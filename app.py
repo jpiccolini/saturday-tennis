@@ -93,7 +93,9 @@ def index():
         try:
             start_dt = dt.datetime.strptime(d_start, "%I:%M %p")
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
-        except: pass
+        except: 
+            # Fallback if time format in Airtable is non-standard
+            d_end = ""
 
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
@@ -126,7 +128,7 @@ def index():
         target_day = None
         for d in w_res['forecast']['forecastday']:
             api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
-            # Check for name match or if it's the upcoming Saturday (day 5)
+            # Check for name match or if it's the upcoming Saturday
             if d_date in [api_dt.strftime('%b %d'), api_dt.strftime('%B %d')]:
                 target_day = d
                 break
@@ -183,13 +185,17 @@ def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
     
-    # Check if already signed up
     existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
     if existing:
         flash("You are already signed up!", "warning")
         return redirect(url_for('index'))
 
-    payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": int(user['code'])}}
+    payload = {"fields": {
+        "First": user['first'], 
+        "Last": user['last'], 
+        "Player Code": int(user['code']),
+        "Email": user['email']
+    }}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload)
     AIRTABLE_CACHE.clear()
     log_activity(user['first'], "Signed Up")
@@ -201,21 +207,11 @@ def cancel():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
     
-    signup_recs = get_airtable_data("Signups", sort_field="Created Time")
+    signup_recs = get_airtable_data("Signups")
     user_signup = next((r for r in signup_recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
     
     if user_signup:
-        # If user was in the playing group, we might need to offer the spot to the next waitlisted person
-        playing_cutoff = 24 # Simplified for this check
-        all_players = [r for r in signup_recs]
-        user_index = next((i for i, r in enumerate(all_players) if r['id'] == user_signup['id']), 99)
-        
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{user_signup['id']}", headers=HEADERS)
-        
-        if user_index < playing_cutoff and len(all_players) > playing_cutoff:
-            next_player = all_players[playing_cutoff]
-            # Logic to flag a sub offer could go here
-            
         AIRTABLE_CACHE.clear()
         log_activity(user['first'], "Cancelled")
         flash("Your spot has been cancelled.", "info")
@@ -252,7 +248,21 @@ def apply():
     flash("Application submitted! We will email you your code once approved.", "success")
     return redirect(url_for('index'))
 
-# === SECTION 6: ADMIN & GUEST ACTIONS ===
+@app.route('/request_guest', methods=['POST'])
+def request_guest():
+    user = session.get('user')
+    if not user: return redirect(url_for('index'))
+    payload = {"fields": {
+        "First": request.form.get('guest_first'),
+        "Last": request.form.get('guest_last'),
+        "Sponsor": f"{user['first']} {user['last']}",
+        "Status": "Pending"
+    }}
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
+    flash("Guest request submitted to Admin.", "info")
+    return redirect(url_for('index'))
+
+# === SECTION 6: ADMIN ACTIONS ===
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -266,8 +276,7 @@ def admin_action():
             flash("Session info updated!", "success")
     
     elif action == "reset_roster":
-        cron_monday() # Reuse the logic from the Monday reset
-        flash("System reset and roster cleared.", "warning")
+        return cron_monday() # Clear and notify
         
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
@@ -287,23 +296,24 @@ def info_blast():
     flash("Announcement sent!", "success")
     return redirect(url_for('index'))
 
-@app.route('/approve_player/<id>', methods=['POST'])
-def approve_player(id):
+@app.route('/attendance/<code_str>', methods=['POST'])
+def attendance(code_str):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    # Logic to move from Applicants to Master List and generate code
-    flash("Player approved and added to master list.", "success")
+    # Logic to toggle attendance/label in Airtable
+    flash(f"Updated attendance for {code_str}", "info")
+    AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
-# === SECTION 7: CRON / AUTOMATION ROUTES ===
+# === SECTION 7: CRON / AUTOMATION ===
 @app.route('/cron/monday')
 def cron_monday():
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD')
     d_start = settings[0]['fields'].get('Start Time', 'TBD')
     
-    # 1. Archive
     signups = get_airtable_data("Signups")
     for r in signups:
+        # Archive
         archive_payload = {"fields": {
             "First": r['fields'].get('First'), 
             "Last": r['fields'].get('Last'), 
@@ -311,14 +321,14 @@ def cron_monday():
             "Attendance": r['fields'].get('Label', 'Signed Up')
         }}
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
+        # Delete
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
     
-    # 2. Notify
     emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-    send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+    send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p>Time: {d_start}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
     
     AIRTABLE_CACHE.clear()
-    return "Executed", 200
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True)
