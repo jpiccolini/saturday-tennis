@@ -97,17 +97,26 @@
                         </div>
                     </div>
 
-                    <div class="modal fade" id="profileModal" tabindex="-1">
+                    <div class="modal fade" id="profileModal" tabindex="-1" {% if not session.user.get('contact_confirmed') %}data-bs-backdrop="static" data-bs-keyboard="false"{% endif %}>
                         <div class="modal-dialog">
                             <form action="/update_profile" method="POST" class="modal-content">
-                                <div class="modal-header"><h5>Update Profile</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                <div class="modal-header">
+                                    <h5 class="modal-title">{% if not session.user.get('contact_confirmed') %}Routine 6-Month Contact Review{% else %}Update Profile{% endif %}</h5>
+                                    {% if session.user.get('contact_confirmed') %}<button type="button" class="btn-close" data-bs-dismiss="modal"></button>{% endif %}
+                                </div>
                                 <div class="modal-body text-start">
+                                    {% if not session.user.get('contact_confirmed') %}
+                                        <div class="alert alert-warning small">It's been a while! Please confirm or update your email and phone number to continue using the site. Both fields are required so subs can reach you.</div>
+                                    {% endif %}
                                     <label class="form-label small fw-bold">Email</label>
                                     <input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email', '') }}" required>
                                     <label class="form-label small fw-bold">Phone</label>
-                                    <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}">
+                                    <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}" required>
                                 </div>
-                                <div class="modal-footer"><button class="btn btn-success">Save</button></div>
+                                <div class="modal-footer">
+                                    {% if session.user.get('contact_confirmed') %}<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>{% endif %}
+                                    <button type="submit" class="btn btn-success">{% if not session.user.get('contact_confirmed') %}Confirm & Save{% else %}Save Changes{% endif %}</button>
+                                </div>
                             </form>
                         </div>
                     </div>
@@ -224,6 +233,16 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Auto-trigger Mandatory Profile Modal if 6 months have passed
+            {% if session.get('user') and not session.user.get('contact_confirmed') %}
+                var profileModal = new bootstrap.Modal(document.getElementById('profileModal'), {
+                    backdrop: 'static',
+                    keyboard: false
+                });
+                profileModal.show();
+            {% endif %}
+
+            // Directory Search filter
             const searchInput = document.getElementById('directorySearch');
             if(searchInput) {
                 searchInput.addEventListener('keyup', function() {
