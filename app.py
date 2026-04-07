@@ -119,23 +119,37 @@ def index():
             if str(p.get('Sub Offer')) == str(curr_user.get('code')):
                 pending_sub_offer = True
 
+    # FLEXIBLE WEATHER LOGIC WITH END-OF-SESSION RESTORED
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=8").json()
         target_day = None
         for d in w_res['forecast']['forecastday']:
             api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
-            if d_date in [api_dt.strftime('%b %d'), api_dt.strftime('%B %d')]:
+            # Check multiple date formats just in case
+            d1, d2 = api_dt.strftime('%b %d'), api_dt.strftime('%b %d').replace(' 0', ' ')
+            d3, d4 = api_dt.strftime('%B %d'), api_dt.strftime('%B %d').replace(' 0', ' ')
+            if d_date in [d1, d2, d3, d4]:
                 target_day = d
                 break
+                
+        # Fallback to the next upcoming Saturday
         if not target_day:
             target_day = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
             
         if target_day:
             s_hour = start_dt.hour if start_dt else 9
+            e_hour = min(s_hour + 2, 23) # Project 2 hours ahead
+            
             cond = target_day['hour'][s_hour]['condition']['text']
-            temp = int(target_day['hour'][s_hour]['temp_f'])
-            weather_info = f"{cond} | {temp}°F at session start"
+            temp_start = int(target_day['hour'][s_hour]['temp_f'])
+            temp_end = int(target_day['hour'][e_hour]['temp_f'])
+            
+            if start_dt:
+                end_time_label = (start_dt + dt.timedelta(hours=2)).strftime('%I:%M %p').lstrip('0')
+                weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_time_label}: {temp_end}°F"
+            else:
+                weather_info = f"{cond} | Start: {temp_start}°F → End: {temp_end}°F"
     except: pass
 
     applicants, guest_requests = [], []
