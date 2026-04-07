@@ -9,10 +9,9 @@
         body { background-color: #f8f9fa; }
         .roster-card { transition: 0.2s; border-left: 5px solid #198754; }
         .waitlist-card { border-left: 5px solid #ffc107; border-right: 5px solid #ffc107; }
-        .admin-badge { font-size: 0.7rem; vertical-align: middle; }
+        .admin-sidebar-box { border: 1px solid #dc3545; background-color: #fffafa; border-radius: 8px; }
         .clickable-header { cursor: pointer; }
         .clickable-header:hover { opacity: 0.9; }
-        .admin-sidebar-box { border: 1px solid #dc3545; background-color: #fff5f5; }
     </style>
 </head>
 <body>
@@ -26,16 +25,12 @@
             <div>
                 <span class="badge bg-success fs-6 me-1">{{ playing_cutoff }} Playing</span>
                 <span class="badge bg-warning text-dark fs-6 me-1">{{ waitlist_count }} Waitlisted</span>
-                <span class="badge bg-secondary fs-6">{{ total_signups }} Total</span>
             </div>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}
-                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
+                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
             {% endfor %}{% endif %}
         {% endwith %}
 
@@ -44,90 +39,59 @@
                 {% if session.get('user') %}
                     <div class="card shadow border-success mb-4 text-center">
                         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">{{ session.user.get('first', 'Player') }}</h5>
+                            <h5 class="mb-0">{{ session.user.get('first') }}</h5>
                             <div>
-                                <button class="btn btn-sm btn-outline-light me-1" data-bs-toggle="modal" data-bs-target="#profileModal">⚙️ Profile</button>
+                                <button class="btn btn-sm btn-outline-light me-1" data-bs-toggle="modal" data-bs-target="#profileModal">Profile</button>
                                 <a href="/logout" class="btn btn-sm btn-light">Logout</a>
                             </div>
                         </div>
-
-                        <div class="modal fade" id="profileModal" tabindex="-1">
-                            <div class="modal-dialog">
-                                <form action="/update_profile" method="POST" class="modal-content text-dark text-start">
-                                    <div class="modal-header">
-                                        <h5 class="modal-title">Update Contact Info</h5>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold small">Email Address</label>
-                                            <input type="email" name="email" class="form-control" value="{{ session.user.get('email', '') }}" required>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label fw-bold small">Phone Number</label>
-                                            <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}">
-                                        </div>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="submit" class="btn btn-success">Save Changes</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-
                         <div class="card-body">
                             {% if session.user.get('is_admin') %}
-                                <div class="p-3 border rounded admin-sidebar-box mb-3 text-start">
-                                    <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN TOOLS</p>
-                                    
-                                    <h6 class="text-dark small fw-bold mt-2">📣 Send Message Blast</h6>
-                                    <form action="/info_blast" method="POST" class="mb-4">
-                                        <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Write message..." required></textarea>
+                                <div class="p-3 mb-3 text-start admin-sidebar-box">
+                                    <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
+                                    <h6 class="small fw-bold">📣 Message Blast</h6>
+                                    <form action="/info_blast" method="POST" class="mb-3">
+                                        <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Message..." required></textarea>
                                         <select name="target_group" class="form-select form-select-sm mb-2">
-                                            <option value="roster">Current Roster Only</option>
-                                            <option value="master">Entire Master List</option>
+                                            <option value="roster">Roster Only</option>
+                                            <option value="master">Entire List</option>
                                         </select>
-                                        <button class="btn btn-sm btn-danger w-100 fw-bold">Send Blast Now</button>
+                                        <button class="btn btn-sm btn-danger w-100">Send Blast</button>
                                     </form>
-
-                                    <h6 class="text-dark small fw-bold">📅 Update Session Info</h6>
-                                    <form action="/admin_action" method="POST" class="mb-4">
+                                    <h6 class="small fw-bold">📅 Session Update</h6>
+                                    <form action="/admin_action" method="POST">
                                         <input type="hidden" name="action" value="labels">
-                                        <input type="text" name="date" class="form-control form-control-sm mb-2" value="{{ target_date }}">
+                                        <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
                                         <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
-                                        <button class="btn btn-sm btn-outline-dark w-100">Update Labels</button>
+                                        <button class="btn btn-sm btn-outline-dark w-100 mb-2">Update Info</button>
                                     </form>
-
-                                    <h6 class="text-dark small fw-bold">🧹 Reset System</h6>
-                                    <form action="/admin_action" method="POST" onsubmit="return confirm('Archive and clear entire roster?');">
+                                    <form action="/admin_action" method="POST" onsubmit="return confirm('Reset Roster?');">
                                         <input type="hidden" name="action" value="reset_roster">
-                                        <button class="btn btn-sm btn-dark w-100 fw-bold">Archive & Clear Roster</button>
+                                        <button class="btn btn-sm btn-dark w-100">Reset System</button>
                                     </form>
                                 </div>
                             {% endif %}
 
                             {% if pending_sub_offer %}
-                                <div class="alert alert-warning text-center border-warning shadow-sm mb-3">
-                                    <h5 class="text-dark mb-1">🎾 Sub Spot Available!</h5>
-                                    <form action="/accept_sub" method="POST">
-                                        <button type="submit" class="btn btn-success fw-bold w-100 shadow-sm">Accept Sub Spot</button>
-                                    </form>
+                                <div class="alert alert-warning border-warning shadow-sm">
+                                    <h5 class="mb-1">Sub Spot!</h5>
+                                    <form action="/accept_sub" method="POST"><button class="btn btn-success w-100 fw-bold">Accept Spot</button></form>
                                 </div>
                             {% endif %}
 
                             {% if user_on_roster %}
-                                <div class="alert alert-success">You are on the list! {% if waitlist_pos > 0 %}<br><small>(Waitlist #{{ waitlist_pos }})</small>{% endif %}</div>
-                                <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel My Spot</button></form>
+                                <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
+                                <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel Spot</button></form>
                             {% else %}
-                                <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button></form>
+                                <form action="/signup" method="POST"><button class="btn btn-success btn-lg w-100 fw-bold">Sign Up to Play</button></form>
                             {% endif %}
-                            
-                            <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Invite a Guest</button>
+
+                            <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Request Guest</button>
                             <div id="guestForm" class="collapse mt-2 text-start p-2 border rounded bg-light">
                                 <form action="/request_guest" method="POST">
-                                    <input type="text" name="guest_first" class="form-control form-control-sm mb-1" placeholder="Guest First Name" required>
-                                    <input type="text" name="guest_last" class="form-control form-control-sm mb-1" placeholder="Guest Last Name" required>
-                                    <button class="btn btn-sm btn-info text-white w-100 mt-1">Submit Request</button>
+                                    <input type="text" name="guest_first" class="form-control form-control-sm mb-1" placeholder="First Name" required>
+                                    <input type="text" name="guest_last" class="form-control form-control-sm mb-2" placeholder="Last Name" required>
+                                    <button class="btn btn-sm btn-info text-white w-100">Submit Request</button>
                                 </form>
                             </div>
                         </div>
@@ -135,32 +99,22 @@
                 {% else %}
                     <div class="card shadow mb-4">
                         <div class="card-header bg-primary text-white"><h5>Player Login</h5></div>
-                        <div class="card-body text-center">
+                        <div class="card-body">
                             <form action="/validate" method="POST">
-                                <div class="mb-3 text-start">
-                                    <label class="form-label small fw-bold">4-Digit Player Code</label>
-                                    <input type="number" name="code" class="form-control form-control-lg" placeholder="e.g. 1234" required>
-                                </div>
-                                <div class="mb-3 text-start">
-                                    <label class="form-label small fw-bold">Admin Password (Optional)</label>
-                                    <input type="password" name="password" class="form-control" placeholder="Required for Admin Tools">
-                                </div>
-                                <button type="submit" class="btn btn-primary w-100 fw-bold">Enter Site</button>
+                                <div class="mb-3 text-start"><label class="form-label small fw-bold">4-Digit Code</label><input type="number" name="code" class="form-control form-control-lg" required></div>
+                                <div class="mb-3 text-start"><label class="form-label small fw-bold">Admin Password</label><input type="password" name="password" class="form-control"></div>
+                                <button type="submit" class="btn btn-primary w-100 fw-bold">Enter</button>
                             </form>
                             <hr>
-                            <p class="mb-0">Want to join the gang?</p>
-                            <button class="btn btn-link text-success fw-bold" data-bs-toggle="collapse" data-bs-target="#applyForm">Apply to Join Here</button>
-                            
-                            <div id="applyForm" class="collapse mt-3 text-start">
-                                <div class="p-3 border rounded bg-light shadow-sm">
-                                    <form action="/apply" method="POST">
-                                        <input type="text" name="first" class="form-control mb-2" placeholder="First Name" required>
-                                        <input type="text" name="last" class="form-control mb-2" placeholder="Last Name" required>
-                                        <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
-                                        <textarea name="note" class="form-control mb-2" placeholder="How did you hear about us?"></textarea>
-                                        <button class="btn btn-success w-100">Submit Application</button>
-                                    </form>
-                                </div>
+                            <p class="mb-0">New here?</p>
+                            <button class="btn btn-link text-success fw-bold p-0" data-bs-toggle="collapse" data-bs-target="#applyForm">Apply to Join the Gang</button>
+                            <div id="applyForm" class="collapse mt-3">
+                                <form action="/apply" method="POST" class="p-3 border rounded bg-light shadow-sm text-start">
+                                    <input type="text" name="first" class="form-control mb-2" placeholder="First" required>
+                                    <input type="text" name="last" class="form-control mb-2" placeholder="Last" required>
+                                    <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
+                                    <button class="btn btn-success w-100">Submit Application</button>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -168,72 +122,44 @@
             </div>
 
             <div class="col-md-7">
-                <div class="card shadow mb-4 border-0">
+                <div class="card shadow mb-4">
                     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#rosterCollapse">
                         <h4 class="mb-0">Live Roster 🔽</h4>
                         <span class="badge bg-secondary">{{ roster|length }} Signed Up</span>
                     </div>
                     <div id="rosterCollapse" class="collapse show">
-                        <div class="card-body p-2" style="background-color: #eee; min-height: 200px;">
+                        <div class="card-body p-2" style="background-color: #eee;">
                             {% for player in roster %}
                                 {% if loop.index0 % 4 == 0 %}
-                                    {% if loop.index0 < playing_cutoff %}
-                                        <h6 class="mt-3 mb-2 text-success fw-bold border-bottom border-success pb-1">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
-                                    {% elif loop.index0 == playing_cutoff %}
-                                        <h6 class="mt-4 mb-2 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist</h6>
-                                    {% endif %}
+                                    {% if loop.index0 < playing_cutoff %}<h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">Court {{ (loop.index0 // 4) + 1 }}</h6>
+                                    {% elif loop.index0 == playing_cutoff %}<h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">Waitlist</h6>{% endif %}
                                 {% endif %}
                                 <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
-                                    <div>
-                                        <span class="fw-bold">{{ loop.index }}. {{ player.First }} {{ player.Last }}</span>
-                                        {% if player.Label %}<span class="badge bg-warning text-dark ms-2">{{ player.Label }}</span>{% endif %}
-                                        {% if session.get('user') and session.user.get('is_admin') and player.strikes > 0 %}
-                                            <span class="badge bg-dark ms-1 admin-badge">{{ player.strikes }} ⚠️</span>
-                                        {% endif %}
-                                    </div>
+                                    <span class="fw-bold">{{ loop.index }}. {{ player.First }} {{ player.Last }}</span>
                                     {% if session.get('user') and session.user.get('is_admin') %}
-                                        <div class="btn-group">
-                                            <form action="/attendance/{{ player['Player Code'] }}" method="POST" class="d-inline">
-                                                <input type="hidden" name="status" value="Played">
-                                                <button class="btn btn-sm btn-outline-success">✅</button>
-                                            </form>
-                                        </div>
+                                        <form action="/attendance/{{ player['Player Code'] }}" method="POST"><input type="hidden" name="status" value="Played"><button class="btn btn-sm btn-outline-success">✅</button></form>
                                     {% endif %}
                                 </div>
                             {% endfor %}
-                            {% if not roster %}
-                                <div class="text-center py-5 text-muted">No one has signed up yet.</div>
-                            {% endif %}
                         </div>
                     </div>
                 </div>
 
                 {% if session.get('user') and session.user.get('is_admin') %}
                 <div class="card shadow border-danger mb-4">
-                    <div class="card-header bg-danger text-white"><h5 class="mb-0">👤 Pending Approvals</h5></div>
+                    <div class="card-header bg-danger text-white"><h5 class="mb-0">Pending Approvals</h5></div>
                     <div class="card-body">
                         <div class="row">
-                            <div class="col-md-6 mb-3 border-end">
-                                <h6 class="text-primary fw-bold">New Players</h6>
+                            <div class="col-6 border-end">
+                                <h6 class="text-primary fw-bold">Applicants</h6>
                                 {% for app in applicants %}
-                                    <div class="p-2 border rounded mb-2 bg-light shadow-sm">
-                                        <strong>{{ app.fields.First }} {{ app.fields.Last }}</strong><br>
-                                        <form action="/approve_player/{{ app.id }}" method="POST" class="mt-1">
-                                            <button class="btn btn-sm btn-success w-100">Approve</button>
-                                        </form>
-                                    </div>
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ app.fields.First }} {{ app.fields.Last }}<form action="/approve_player/{{ app.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-success w-100">Approve</button></form></div>
                                 {% endfor %}
                             </div>
-                            <div class="col-md-6 mb-3">
-                                <h6 class="text-info fw-bold">Guest Requests</h6>
+                            <div class="col-6">
+                                <h6 class="text-info fw-bold">Guests</h6>
                                 {% for guest in guest_requests %}
-                                    <div class="p-2 border rounded mb-2 bg-light shadow-sm">
-                                        <strong>{{ guest.fields.First }}</strong><br>
-                                        <small>Sponsor: {{ guest.fields.Sponsor }}</small>
-                                        <form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1">
-                                            <button class="btn btn-sm btn-info text-white w-100">Add to Roster</button>
-                                        </form>
-                                    </div>
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ guest.fields.First }}<form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-info text-white w-100">Approve</button></form></div>
                                 {% endfor %}
                             </div>
                         </div>
@@ -242,49 +168,12 @@
                 {% endif %}
             </div>
         </div>
+    </div>
 
-        {% if session.get('user') %}
-        <div class="card mt-2 shadow border-0 mb-5">
-            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#dirCollapse">
-                <h5 class="mb-0">Club Directory 🔽</h5>
-            </div>
-            <div id="dirCollapse" class="collapse">
-                <div class="card-body bg-light border-bottom">
-                    <input type="text" id="directorySearch" class="form-control" placeholder="🔍 Search members by name...">
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0" id="directoryTable">
-                        <thead class="table-light"><tr><th>Name</th><th>Contact Info</th></tr></thead>
-                        <tbody>
-                            {% for p in master_list %}
-                            <tr {% if p.fields.get('Paused') %}class="table-danger"{% endif %}>
-                                <td>{{ p.fields.get('First') }} {{ p.fields.get('Last') }}</td>
-                                <td><small class="text-muted">{{ p.fields.get('Email', 'No Email') }}<br>{{ p.fields.get('Phone', '') }}</small></td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        {% endif %}
+    <div class="modal fade" id="profileModal" tabindex="-1">
+        <div class="modal-dialog"><form action="/update_profile" method="POST" class="modal-content"><div class="modal-header"><h5>Profile</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email') }}" required><input type="text" name="phone" class="form-control" value="{{ session.user.get('phone') }}"></div><div class="modal-footer"><button class="btn btn-success">Save</button></div></form></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.getElementById('directorySearch');
-            if(searchInput) {
-                searchInput.addEventListener('keyup', function() {
-                    const filter = this.value.toLowerCase();
-                    const rows = document.querySelectorAll('#directoryTable tbody tr');
-                    rows.forEach(row => {
-                        const text = row.textContent.toLowerCase();
-                        row.style.display = text.includes(filter) ? '' : 'none';
-                    });
-                });
-            }
-        });
-    </script>
 </body>
 </html>
