@@ -119,27 +119,24 @@ def index():
             if str(p.get('Sub Offer')) == str(curr_user.get('code')):
                 pending_sub_offer = True
 
-    # FLEXIBLE WEATHER LOGIC WITH END-OF-SESSION RESTORED
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=8").json()
         target_day = None
         for d in w_res['forecast']['forecastday']:
             api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
-            # Check multiple date formats just in case
             d1, d2 = api_dt.strftime('%b %d'), api_dt.strftime('%b %d').replace(' 0', ' ')
             d3, d4 = api_dt.strftime('%B %d'), api_dt.strftime('%B %d').replace(' 0', ' ')
             if d_date in [d1, d2, d3, d4]:
                 target_day = d
                 break
                 
-        # Fallback to the next upcoming Saturday
         if not target_day:
             target_day = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
             
         if target_day:
             s_hour = start_dt.hour if start_dt else 9
-            e_hour = min(s_hour + 2, 23) # Project 2 hours ahead
+            e_hour = min(s_hour + 2, 23) 
             
             cond = target_day['hour'][s_hour]['condition']['text']
             temp_start = int(target_day['hour'][s_hour]['temp_f'])
@@ -174,9 +171,25 @@ def validate():
     if user_rec:
         is_admin = (password == ADMIN_PW)
         f = user_rec['fields']
+        
+        # --- 6-MONTH RE-VERIFICATION LOGIC ---
+        last_confirmed_str = f.get('Last Confirmed')
+        contact_confirmed = False
+        
+        if last_confirmed_str:
+            try:
+                last_conf_date = dt.datetime.strptime(last_confirmed_str, "%Y-%m-%d").date()
+                days_since = (dt.date.today() - last_conf_date).days
+                # If they confirmed within the last 180 days, they are good
+                if days_since < 180:
+                    contact_confirmed = True
+            except:
+                pass
+        
         session['user'] = {
             'code': code, 'first': f.get('First'), 'last': f.get('Last'),
-            'email': f.get('Email'), 'phone': f.get('Phone'), 'is_admin': is_admin
+            'email': f.get('Email'), 'phone': f.get('Phone'), 'is_admin': is_admin,
+            'contact_confirmed': contact_confirmed
         }
         log_activity(f.get('First'), "Logged In")
         return redirect(url_for('index'))
@@ -263,18 +276,35 @@ def accept_sub():
 def update_profile():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
+    
     new_email, new_phone = request.form.get('email'), request.form.get('phone')
+    
+    if not new_email or not new_phone:
+        flash("Both Email and Phone are required.", "danger")
+        return redirect(url_for('index'))
+
     master = get_airtable_data("Master List")
     user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(user['code'])), None)
     
     if user_rec:
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", 
-                       headers=HEADERS, json={"fields": {"Email": new_email, "Phone": new_phone}})
+        # Save to Airtable and stamp today's date
+        today_str = dt.date.today().strftime("%Y-%m-%d")
+        payload = {"fields": {"Email": new_email, "Phone": new_phone, "Last Confirmed": today_str}}
+        
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", 
+                           headers=HEADERS, json=payload).raise_for_status()
+        except Exception as e:
+            # Fallback if the Last Confirmed column doesn't exist yet
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", 
+                           headers=HEADERS, json={"fields": {"Email": new_email, "Phone": new_phone}})
+
         session['user']['email'] = new_email
         session['user']['phone'] = new_phone
+        session['user']['contact_confirmed'] = True 
         session.modified = True
         AIRTABLE_CACHE.clear()
-        flash("Profile updated!", "success")
+        flash("Profile confirmed and updated!", "success")
     return redirect(url_for('index'))
 
 @app.route('/apply', methods=['POST'])
