@@ -62,7 +62,7 @@ def send_email(to_emails, subject, html_content, is_multiple=False):
 
 # === SECTION 3: DATA CACHING ENGINE ===
 AIRTABLE_CACHE = {}
-CACHE_TTL = 60 
+CACHE_TTL = 30 
 
 def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formula=None):
     current_time = time.time()
@@ -93,9 +93,7 @@ def index():
         try:
             start_dt = dt.datetime.strptime(d_start, "%I:%M %p")
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
-        except: 
-            # Fallback if time format in Airtable is non-standard
-            d_end = ""
+        except: d_end = ""
 
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
@@ -121,14 +119,12 @@ def index():
             if str(p.get('Sub Offer')) == str(curr_user.get('code')):
                 pending_sub_offer = True
 
-    # FLEXIBLE WEATHER LOGIC
     weather_info = "Weather Unavailable"
     try:
         w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=8").json()
         target_day = None
         for d in w_res['forecast']['forecastday']:
             api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
-            # Check for name match or if it's the upcoming Saturday
             if d_date in [api_dt.strftime('%b %d'), api_dt.strftime('%B %d')]:
                 target_day = d
                 break
@@ -169,10 +165,10 @@ def validate():
             'email': f.get('Email'), 'phone': f.get('Phone'), 'is_admin': is_admin
         }
         log_activity(f.get('First'), "Logged In")
-        flash(f"Welcome, {f.get('First')}!", "success")
+        return redirect(url_for('index'))
     else:
         flash("Invalid Player Code.", "danger")
-    return redirect(url_for('index'))
+        return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
@@ -190,40 +186,70 @@ def signup():
         flash("You are already signed up!", "warning")
         return redirect(url_for('index'))
 
-    payload = {"fields": {
-        "First": user['first'], 
-        "Last": user['last'], 
-        "Player Code": int(user['code']),
-        "Email": user['email']
-    }}
+    payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": int(user['code']), "Email": user['email']}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload)
     AIRTABLE_CACHE.clear()
     log_activity(user['first'], "Signed Up")
-    flash("You've been added to the list!", "success")
     return redirect(url_for('index'))
 
 @app.route('/cancel', methods=['POST'])
 def cancel():
-    user = session.get('user')
-    if not user: return redirect(url_for('index'))
+    if not session.get('user'): return redirect(url_for('index'))
+    now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
+    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 8) or (now_mdt.weekday() == 5)
+    recs = get_airtable_data("Signups", sort_field="Created Time")
     
-    signup_recs = get_airtable_data("Signups")
-    user_signup = next((r for r in signup_recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
+    idx = next((i for i, r in enumerate(recs) if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
+    if idx is not None:
+        playing_cutoff = (min(len(recs), 24) // 4) * 4
+        is_in_complete_court = idx < playing_cutoff
+        waitlist_exists = len(recs) > playing_cutoff
+        
+        if is_in_complete_court and is_past_deadline:
+            if waitlist_exists:
+                promo = recs[playing_cutoff]
+                promo_code = promo['fields'].get('Player Code')
+                m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{promo_code}'")
+                promo_email = m_recs[0]['fields'].get('Email') if m_recs else None
+
+                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS, 
+                               json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
+                if promo_email:
+                    send_email(promo_email, "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
+                    flash("Drop initiated. Waitlisted player emailed.", "warning")
+                else:
+                    flash("Drop initiated, but the waitlisted player has no email on file!", "warning")
+            else:
+                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS, json={"fields": {"Label": "NEEDS SUB"}})
+                flash("⚠️ NO ONE is on the waitlist. You are marked NEEDS SUB.", "danger")
+            AIRTABLE_CACHE.clear()
+            return redirect(url_for('index'))
+
+        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{recs[idx]['id']}", headers=HEADERS)
+        log_activity(session['user']['first'], "Cancelled")
     
-    if user_signup:
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{user_signup['id']}", headers=HEADERS)
+    AIRTABLE_CACHE.clear()
+    return redirect(url_for('index'))
+
+@app.route('/accept_sub', methods=['POST'])
+def accept_sub():
+    if not session.get('user'): return redirect(url_for('index'))
+    recs = get_airtable_data("Signups")
+    dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(session['user']['code'])), None)
+    me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
+    if dropper and me:
+        dropper_name = dropper['fields'].get('First')
+        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{dropper['id']}", headers=HEADERS)
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, json={"fields": {"Label": f"SUB for {dropper_name}"}})
         AIRTABLE_CACHE.clear()
-        log_activity(user['first'], "Cancelled")
-        flash("Your spot has been cancelled.", "info")
+        flash("You successfully accepted the sub spot!", "success")
     return redirect(url_for('index'))
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
-    new_email = request.form.get('email')
-    new_phone = request.form.get('phone')
-    
+    new_email, new_phone = request.form.get('email'), request.form.get('phone')
     master = get_airtable_data("Master List")
     user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(user['code'])), None)
     
@@ -232,18 +258,14 @@ def update_profile():
                        headers=HEADERS, json={"fields": {"Email": new_email, "Phone": new_phone}})
         session['user']['email'] = new_email
         session['user']['phone'] = new_phone
+        session.modified = True
         AIRTABLE_CACHE.clear()
         flash("Profile updated!", "success")
     return redirect(url_for('index'))
 
 @app.route('/apply', methods=['POST'])
 def apply():
-    payload = {"fields": {
-        "First": request.form.get('first'),
-        "Last": request.form.get('last'),
-        "Email": request.form.get('email'),
-        "Status": "Pending"
-    }}
+    payload = {"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Status": "Pending"}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
     flash("Application submitted! We will email you your code once approved.", "success")
     return redirect(url_for('index'))
@@ -252,12 +274,7 @@ def apply():
 def request_guest():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
-    payload = {"fields": {
-        "First": request.form.get('guest_first'),
-        "Last": request.form.get('guest_last'),
-        "Sponsor": f"{user['first']} {user['last']}",
-        "Status": "Pending"
-    }}
+    payload = {"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending"}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
     flash("Guest request submitted to Admin.", "info")
     return redirect(url_for('index'))
@@ -267,39 +284,55 @@ def request_guest():
 def admin_action():
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     action = request.form.get('action')
-    
     if action == "labels":
         settings = get_airtable_data("Settings")
         if settings:
-            payload = {"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}}
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json=payload)
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
             flash("Session info updated!", "success")
-    
     elif action == "reset_roster":
-        return cron_monday() # Clear and notify
-        
+        return cron_monday() # Clear and notify  
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
 @app.route('/info_blast', methods=['POST'])
 def info_blast():
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    msg = request.form.get('message')
-    group = request.form.get('target_group')
-    
-    if group == "roster":
-        emails = [r['fields'].get('Email') for r in get_airtable_data("Signups") if r['fields'].get('Email')]
-    else:
-        emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        
+    msg, group = request.form.get('message'), request.form.get('target_group')
+    emails = [r['fields'].get('Email') for r in get_airtable_data("Signups" if group == "roster" else "Master List") if r['fields'].get('Email')]
     send_email(emails, "🎾 Tennis Gang Announcement", f"<p>{msg}</p>", is_multiple=True)
     flash("Announcement sent!", "success")
+    return redirect(url_for('index'))
+
+@app.route('/approve_player/<id>', methods=['POST'])
+def approve_player(id):
+    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
+    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{id}", headers=HEADERS).json()
+    f = res.get('fields', {})
+    m_list = get_airtable_data("Master List")
+    highest_code = max([int(str(m['fields'].get('Code')).strip()) for m in m_list if str(m['fields'].get('Code')).isdigit() and 1000 < int(str(m['fields'].get('Code')).strip()) < 9000], default=1000)
+    new_code = str(highest_code + 1)
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json={"fields": {"First": f.get('First'), "Last": f.get('Last'), "Email": f.get('Email'), "Code": new_code}, "typecast": True})
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{id}", headers=HEADERS, json={"fields": {"Status": "Approved", "Assigned Code": new_code}, "typecast": True})
+    send_email(f.get('Email'), "🎾 Welcome to the Gang!", f"<p>Approved. Login code: <b>{new_code}</b></p>")
+    flash(f"Approved with Code {new_code}.", "success")
+    AIRTABLE_CACHE.clear()
+    return redirect(url_for('index'))
+
+@app.route('/approve_guest/<app_id>', methods=['POST'])
+def approve_guest(app_id):
+    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
+    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
+    f = res.get('fields', {})
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json={"fields": {"First": f.get('First'), "Last": f.get('Last'), "Player Code": "GUEST", "Label": f"GUEST of {f.get('Sponsor')}"}})
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
+    flash(f"Guest added to roster!", "success")
+    AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
 @app.route('/attendance/<code_str>', methods=['POST'])
 def attendance(code_str):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    # Logic to toggle attendance/label in Airtable
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": request.form.get('status'), "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
     flash(f"Updated attendance for {code_str}", "info")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
@@ -308,20 +341,13 @@ def attendance(code_str):
 @app.route('/cron/monday')
 def cron_monday():
     settings = get_airtable_data("Settings")
-    d_date = settings[0]['fields'].get('Target Date', 'TBD')
-    d_start = settings[0]['fields'].get('Start Time', 'TBD')
+    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
+    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     
     signups = get_airtable_data("Signups")
     for r in signups:
-        # Archive
-        archive_payload = {"fields": {
-            "First": r['fields'].get('First'), 
-            "Last": r['fields'].get('Last'), 
-            "Date": d_date,
-            "Attendance": r['fields'].get('Label', 'Signed Up')
-        }}
+        archive_payload = {"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}}
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
-        # Delete
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
     
     emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
