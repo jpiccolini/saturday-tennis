@@ -12,6 +12,7 @@
         .admin-badge { font-size: 0.7rem; vertical-align: middle; }
         .clickable-header { cursor: pointer; }
         .clickable-header:hover { opacity: 0.9; }
+        .admin-sidebar-box { border: 1px solid #dc3545; background-color: #fff5f5; }
     </style>
 </head>
 <body>
@@ -76,41 +77,65 @@
 
                         <div class="card-body">
                             {% if session.user.get('is_admin') %}
-                                <div class="p-3 border rounded bg-light mb-3 text-start">
-                                    <p class="text-primary fw-bold text-center border-bottom pb-2">ADMIN TOOLS</p>
-                                    <h6 class="text-secondary">📣 Send Message Blast</h6>
-                                    <form action="/info_blast" method="POST">
+                                <div class="p-3 border rounded admin-sidebar-box mb-3 text-start">
+                                    <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN TOOLS</p>
+                                    
+                                    <h6 class="text-dark small fw-bold mt-2">📣 Send Message Blast</h6>
+                                    <form action="/info_blast" method="POST" class="mb-4">
                                         <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Write message..." required></textarea>
                                         <select name="target_group" class="form-select form-select-sm mb-2">
                                             <option value="roster">Current Roster Only</option>
                                             <option value="master">Entire Master List</option>
                                         </select>
-                                        <button class="btn btn-sm btn-primary w-100 fw-bold">Send Blast Now</button>
+                                        <button class="btn btn-sm btn-danger w-100 fw-bold">Send Blast Now</button>
+                                    </form>
+
+                                    <h6 class="text-dark small fw-bold">📅 Update Session Info</h6>
+                                    <form action="/admin_action" method="POST" class="mb-4">
+                                        <input type="hidden" name="action" value="labels">
+                                        <input type="text" name="date" class="form-control form-control-sm mb-2" value="{{ target_date }}">
+                                        <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
+                                        <button class="btn btn-sm btn-outline-dark w-100">Update Labels</button>
+                                    </form>
+
+                                    <h6 class="text-dark small fw-bold">🧹 Reset System</h6>
+                                    <form action="/admin_action" method="POST" onsubmit="return confirm('Archive and clear entire roster?');">
+                                        <input type="hidden" name="action" value="reset_roster">
+                                        <button class="btn btn-sm btn-dark w-100 fw-bold">Archive & Clear Roster</button>
                                     </form>
                                 </div>
-                            {% else %}
-                                {% if pending_sub_offer %}
-                                    <div class="alert alert-warning text-center border-warning shadow-sm mb-3">
-                                        <h5 class="text-dark mb-1">🎾 Sub Spot Available!</h5>
-                                        <form action="/accept_sub" method="POST">
-                                            <button type="submit" class="btn btn-success fw-bold w-100 shadow-sm">Accept Sub Spot</button>
-                                        </form>
-                                    </div>
-                                {% endif %}
-
-                                {% if user_on_roster %}
-                                    <div class="alert alert-success">You are on the list! {% if waitlist_pos > 0 %}<br><small>(Waitlist #{{ waitlist_pos }})</small>{% endif %}</div>
-                                    <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel My Spot</button></form>
-                                {% else %}
-                                    <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button></form>
-                                {% endif %}
                             {% endif %}
+
+                            {% if pending_sub_offer %}
+                                <div class="alert alert-warning text-center border-warning shadow-sm mb-3">
+                                    <h5 class="text-dark mb-1">🎾 Sub Spot Available!</h5>
+                                    <form action="/accept_sub" method="POST">
+                                        <button type="submit" class="btn btn-success fw-bold w-100 shadow-sm">Accept Sub Spot</button>
+                                    </form>
+                                </div>
+                            {% endif %}
+
+                            {% if user_on_roster %}
+                                <div class="alert alert-success">You are on the list! {% if waitlist_pos > 0 %}<br><small>(Waitlist #{{ waitlist_pos }})</small>{% endif %}</div>
+                                <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel My Spot</button></form>
+                            {% else %}
+                                <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button></form>
+                            {% endif %}
+                            
+                            <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Invite a Guest</button>
+                            <div id="guestForm" class="collapse mt-2 text-start p-2 border rounded bg-light">
+                                <form action="/request_guest" method="POST">
+                                    <input type="text" name="guest_first" class="form-control form-control-sm mb-1" placeholder="Guest First Name" required>
+                                    <input type="text" name="guest_last" class="form-control form-control-sm mb-1" placeholder="Guest Last Name" required>
+                                    <button class="btn btn-sm btn-info text-white w-100 mt-1">Submit Request</button>
+                                </form>
+                            </div>
                         </div>
                     </div>
                 {% else %}
                     <div class="card shadow mb-4">
                         <div class="card-header bg-primary text-white"><h5>Player Login</h5></div>
-                        <div class="card-body">
+                        <div class="card-body text-center">
                             <form action="/validate" method="POST">
                                 <div class="mb-3 text-start">
                                     <label class="form-label small fw-bold">4-Digit Player Code</label>
@@ -122,6 +147,21 @@
                                 </div>
                                 <button type="submit" class="btn btn-primary w-100 fw-bold">Enter Site</button>
                             </form>
+                            <hr>
+                            <p class="mb-0">Want to join the gang?</p>
+                            <button class="btn btn-link text-success fw-bold" data-bs-toggle="collapse" data-bs-target="#applyForm">Apply to Join Here</button>
+                            
+                            <div id="applyForm" class="collapse mt-3 text-start">
+                                <div class="p-3 border rounded bg-light shadow-sm">
+                                    <form action="/apply" method="POST">
+                                        <input type="text" name="first" class="form-control mb-2" placeholder="First Name" required>
+                                        <input type="text" name="last" class="form-control mb-2" placeholder="Last Name" required>
+                                        <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
+                                        <textarea name="note" class="form-control mb-2" placeholder="How did you hear about us?"></textarea>
+                                        <button class="btn btn-success w-100">Submit Application</button>
+                                    </form>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 {% endif %}
@@ -170,11 +210,11 @@
 
                 {% if session.get('user') and session.user.get('is_admin') %}
                 <div class="card shadow border-danger mb-4">
-                    <div class="card-header bg-danger text-white"><h5 class="mb-0">⚙️ Settings & Approvals</h5></div>
+                    <div class="card-header bg-danger text-white"><h5 class="mb-0">👤 Pending Approvals</h5></div>
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-6 mb-3 border-end">
-                                <h6 class="text-primary fw-bold">Pending Players</h6>
+                                <h6 class="text-primary fw-bold">New Players</h6>
                                 {% for app in applicants %}
                                     <div class="p-2 border rounded mb-2 bg-light shadow-sm">
                                         <strong>{{ app.fields.First }} {{ app.fields.Last }}</strong><br>
@@ -197,11 +237,6 @@
                                 {% endfor %}
                             </div>
                         </div>
-                        <hr>
-                        <form action="/admin_action" method="POST" onsubmit="return confirm('Archive and clear entire roster?');">
-                            <input type="hidden" name="action" value="reset_roster">
-                            <button class="btn btn-danger w-100 fw-bold shadow-sm">ARCHIVE & CLEAR ROSTER</button>
-                        </form>
                     </div>
                 </div>
                 {% endif %}
@@ -238,7 +273,6 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Directory Search Filter Logic
             const searchInput = document.getElementById('directorySearch');
             if(searchInput) {
                 searchInput.addEventListener('keyup', function() {
