@@ -65,7 +65,7 @@
                                         <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
                                         <button class="btn btn-sm btn-outline-dark w-100 mb-2">Update Info</button>
                                     </form>
-                                    <form action="/admin_action" method="POST" onsubmit="return confirm('Reset Roster?');">
+                                    <form action="/admin_action" method="POST" onsubmit="return confirm('Archive and clear entire roster?');">
                                         <input type="hidden" name="action" value="reset_roster">
                                         <button class="btn btn-sm btn-dark w-100">Reset System</button>
                                     </form>
@@ -83,7 +83,7 @@
                                 <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
                                 <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel Spot</button></form>
                             {% else %}
-                                <form action="/signup" method="POST"><button class="btn btn-success btn-lg w-100 fw-bold">Sign Up to Play</button></form>
+                                <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold">Sign Up to Play</button></form>
                             {% endif %}
 
                             <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Request Guest</button>
@@ -96,10 +96,26 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="modal fade" id="profileModal" tabindex="-1">
+                        <div class="modal-dialog">
+                            <form action="/update_profile" method="POST" class="modal-content">
+                                <div class="modal-header"><h5>Update Profile</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                <div class="modal-body text-start">
+                                    <label class="form-label small fw-bold">Email</label>
+                                    <input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email', '') }}" required>
+                                    <label class="form-label small fw-bold">Phone</label>
+                                    <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}">
+                                </div>
+                                <div class="modal-footer"><button class="btn btn-success">Save</button></div>
+                            </form>
+                        </div>
+                    </div>
+
                 {% else %}
                     <div class="card shadow mb-4">
                         <div class="card-header bg-primary text-white"><h5>Player Login</h5></div>
-                        <div class="card-body">
+                        <div class="card-body text-center">
                             <form action="/validate" method="POST">
                                 <div class="mb-3 text-start"><label class="form-label small fw-bold">4-Digit Code</label><input type="number" name="code" class="form-control form-control-lg" required></div>
                                 <div class="mb-3 text-start"><label class="form-label small fw-bold">Admin Password</label><input type="password" name="password" class="form-control"></div>
@@ -110,8 +126,8 @@
                             <button class="btn btn-link text-success fw-bold p-0" data-bs-toggle="collapse" data-bs-target="#applyForm">Apply to Join the Gang</button>
                             <div id="applyForm" class="collapse mt-3">
                                 <form action="/apply" method="POST" class="p-3 border rounded bg-light shadow-sm text-start">
-                                    <input type="text" name="first" class="form-control mb-2" placeholder="First" required>
-                                    <input type="text" name="last" class="form-control mb-2" placeholder="Last" required>
+                                    <input type="text" name="first" class="form-control mb-2" placeholder="First Name" required>
+                                    <input type="text" name="last" class="form-control mb-2" placeholder="Last Name" required>
                                     <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
                                     <button class="btn btn-success w-100">Submit Application</button>
                                 </form>
@@ -131,16 +147,25 @@
                         <div class="card-body p-2" style="background-color: #eee;">
                             {% for player in roster %}
                                 {% if loop.index0 % 4 == 0 %}
-                                    {% if loop.index0 < playing_cutoff %}<h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">Court {{ (loop.index0 // 4) + 1 }}</h6>
-                                    {% elif loop.index0 == playing_cutoff %}<h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">Waitlist</h6>{% endif %}
+                                    {% if loop.index0 < playing_cutoff %}<h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
+                                    {% elif loop.index0 == playing_cutoff %}<h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist</h6>{% endif %}
                                 {% endif %}
                                 <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
-                                    <span class="fw-bold">{{ loop.index }}. {{ player.First }} {{ player.Last }}</span>
+                                    <div>
+                                        <span class="fw-bold">{{ loop.index }}. {{ player.get('First', '') }} {{ player.get('Last', '') }}</span>
+                                        {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-2">{{ player.get('Label') }}</span>{% endif %}
+                                        {% if session.get('user') and session.user.get('is_admin') and player.get('strikes', 0) > 0 %}
+                                            <span class="badge bg-dark ms-1 admin-badge">{{ player.strikes }} ⚠️</span>
+                                        {% endif %}
+                                    </div>
                                     {% if session.get('user') and session.user.get('is_admin') %}
-                                        <form action="/attendance/{{ player['Player Code'] }}" method="POST"><input type="hidden" name="status" value="Played"><button class="btn btn-sm btn-outline-success">✅</button></form>
+                                        <form action="/attendance/{{ player.get('Player Code') }}" method="POST"><input type="hidden" name="status" value="Played"><button class="btn btn-sm btn-outline-success">✅</button></form>
                                     {% endif %}
                                 </div>
                             {% endfor %}
+                            {% if not roster %}
+                                <div class="text-center py-5 text-muted">No one has signed up yet.</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -153,13 +178,13 @@
                             <div class="col-6 border-end">
                                 <h6 class="text-primary fw-bold">Applicants</h6>
                                 {% for app in applicants %}
-                                    <div class="p-2 border rounded mb-2 bg-light small">{{ app.fields.First }} {{ app.fields.Last }}<form action="/approve_player/{{ app.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-success w-100">Approve</button></form></div>
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ app.fields.get('First') }} {{ app.fields.get('Last') }}<form action="/approve_player/{{ app.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-success w-100">Approve</button></form></div>
                                 {% endfor %}
                             </div>
                             <div class="col-6">
                                 <h6 class="text-info fw-bold">Guests</h6>
                                 {% for guest in guest_requests %}
-                                    <div class="p-2 border rounded mb-2 bg-light small">{{ guest.fields.First }}<form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-info text-white w-100">Approve</button></form></div>
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ guest.fields.get('First') }}<br><small>Sponsor: {{ guest.fields.get('Sponsor') }}</small><form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-info text-white w-100">Approve</button></form></div>
                                 {% endfor %}
                             </div>
                         </div>
@@ -168,12 +193,48 @@
                 {% endif %}
             </div>
         </div>
-    </div>
 
-    <div class="modal fade" id="profileModal" tabindex="-1">
-        <div class="modal-dialog"><form action="/update_profile" method="POST" class="modal-content"><div class="modal-header"><h5>Profile</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email') }}" required><input type="text" name="phone" class="form-control" value="{{ session.user.get('phone') }}"></div><div class="modal-footer"><button class="btn btn-success">Save</button></div></form></div>
+        {% if session.get('user') %}
+        <div class="card mt-2 shadow border-0 mb-5">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#dirCollapse">
+                <h5 class="mb-0">Club Directory 🔽</h5>
+            </div>
+            <div id="dirCollapse" class="collapse">
+                <div class="card-body bg-light border-bottom">
+                    <input type="text" id="directorySearch" class="form-control" placeholder="🔍 Search members by name...">
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="directoryTable">
+                        <thead class="table-light"><tr><th>Name</th><th>Contact Info</th></tr></thead>
+                        <tbody>
+                            {% for p in master_list %}
+                            <tr {% if p.fields.get('Paused') %}class="table-danger"{% endif %}>
+                                <td>{{ p.fields.get('First') }} {{ p.fields.get('Last') }}</td>
+                                <td><small class="text-muted">{{ p.fields.get('Email', 'No Email') }}<br>{{ p.fields.get('Phone', '') }}</small></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('directorySearch');
+            if(searchInput) {
+                searchInput.addEventListener('keyup', function() {
+                    const filter = this.value.toLowerCase();
+                    const rows = document.querySelectorAll('#directoryTable tbody tr');
+                    rows.forEach(row => {
+                        row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+                    });
+                });
+            }
+        });
+    </script>
 </body>
 </html>
