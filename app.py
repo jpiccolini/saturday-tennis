@@ -2,7 +2,7 @@
 # TABLE OF CONTENTS - app.py
 # 1. SETUP & CONFIG (Env Vars, Headers)
 # 2. UTILITY FUNCTIONS (Email, Logging)
-# 3. DATA CACHING ENGINE
+# 3. DATA CACHING ENGINE (With Pagination)
 # 4. PRIMARY ROUTES (Index, Login/Logout)
 # 5. PLAYER ACTIONS (Signup, Cancel, Subs, Profile)
 # 6. ADMIN & GUEST ACTIONS
@@ -60,26 +60,49 @@ def send_email(to_emails, subject, html_content, is_multiple=False):
         server.quit()
     except Exception as e: print(f"Email Error: {e}")
 
-# === SECTION 3: DATA CACHING ENGINE ===
+# === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION) ===
 AIRTABLE_CACHE = {}
 CACHE_TTL = 30 
 
 def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formula=None):
     current_time = time.time()
     cache_key = f"{table_name}_{sort_field}_{direction}_{filter_formula}"
+    
     if cache_key in AIRTABLE_CACHE:
         cached_time, cached_data = AIRTABLE_CACHE[cache_key]
         if current_time - cached_time < CACHE_TTL:
             return cached_data
+            
+    records = []
+    offset = None
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name}"
+    
     try:
-        url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name}?"
-        if sort_field: url += f"sort[0][field]={sort_field}&sort[0][direction]={direction}&"
-        if filter_formula: url += f"filterByFormula={filter_formula}"
-        res = requests.get(url, headers=HEADERS)
-        data = res.json().get('records', [])
-        AIRTABLE_CACHE[cache_key] = (current_time, data)
-        return data
-    except: return []
+        # Loop handles Airtable's 100-record limit so nobody gets dropped
+        while True:
+            params = {}
+            if sort_field:
+                params["sort[0][field]"] = sort_field
+                params["sort[0][direction]"] = direction
+            if filter_formula:
+                params["filterByFormula"] = filter_formula
+            if offset:
+                params["offset"] = offset
+                
+            res = requests.get(url, headers=HEADERS, params=params)
+            res.raise_for_status()
+            data = res.json()
+            records.extend(data.get('records', []))
+            
+            offset = data.get('offset')
+            if not offset:
+                break
+                
+        AIRTABLE_CACHE[cache_key] = (current_time, records)
+        return records
+    except Exception as e: 
+        print(f"Airtable Fetch Error ({table_name}): {e}")
+        return []
 
 # === SECTION 4: PRIMARY ROUTES ===
 @app.route('/')
@@ -166,11 +189,19 @@ def validate():
     code = str(request.form.get('code', '')).strip()
     password = request.form.get('password')
     
-    # 1. Fetch entire Master List (bypasses Airtable formula type-matching bugs)
+    # 1. Fetch entire Master List to do safe matching in Python
     master = get_airtable_data("Master List")
     
-    # 2. Securely search in Python
-    user_rec = next((m for m in master if str(m['fields'].get('Code', '')).strip() == code), None)
+    # 2. Robust search: strips spaces and handles rogue ".0" floats from CSV imports
+    user_rec = None
+    for m in master:
+        m_code = str(m['fields'].get('Code', '')).strip()
+        if m_code.endswith('.0'): 
+            m_code = m_code[:-2] # Turn "1060.0" into "1060"
+        
+        if m_code == code:
+            user_rec = m
+            break
     
     if user_rec:
         is_admin = (password == ADMIN_PW)
@@ -196,6 +227,13 @@ def validate():
         log_activity(f.get('First'), "Logged In")
         return redirect(url_for('index'))
     else:
+        # LOG FAILED ATTEMPTS TO AIRTABLE
+        log_activity(f"Failed Code Attempt: '{code}'", "Login Error")
+        
+        # EMAIL ALERT TO ADMIN
+        alert_msg = f"<p>A user just attempted to log in to the Tennis site with an invalid code: <b>{code}</b>.</p>"
+        send_email(ADMIN_EMAIL, "⚠️ Failed Login Attempt", alert_msg)
+        
         flash("Invalid Player Code.", "danger")
         return redirect(url_for('index'))
 
@@ -210,12 +248,12 @@ def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
 
-    # ENFORCEMENT: Server-side check for contact confirmation
+    # ENFORCEMENT: Check for 6-month contact confirmation
     if not user.get('contact_confirmed'):
         flash("Action Required: Please update your contact info to unlock signups.", "danger")
         return redirect(url_for('index'))
 
-    # ENFORCEMENT: Restored Strike/Paused Logic
+    # ENFORCEMENT: Check for Strikes/Paused
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{user['code']}'")
     if m_recs and m_recs[0]['fields'].get('Paused'):
         flash("🚫 Your account is paused due to strikes. Please contact Jim.", "danger")
@@ -226,7 +264,7 @@ def signup():
         flash("You are already signed up!", "warning")
         return redirect(url_for('index'))
 
-    # BUG FIX: Player Code cast to string (str) instead of int to match Airtable structure
+    # Ensure Player Code is a string to match Airtable structure perfectly
     payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email']}}
     
     try:
