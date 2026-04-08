@@ -180,11 +180,9 @@ def validate():
             try:
                 last_conf_date = dt.datetime.strptime(last_confirmed_str, "%Y-%m-%d").date()
                 days_since = (dt.date.today() - last_conf_date).days
-                # If they confirmed within the last 180 days, they are good
                 if days_since < 180:
                     contact_confirmed = True
-            except:
-                pass
+            except: pass
         
         session['user'] = {
             'code': code, 'first': f.get('First'), 'last': f.get('Last'),
@@ -207,16 +205,35 @@ def logout():
 def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
+
+    # ENFORCEMENT: Server-side check for contact confirmation
+    if not user.get('contact_confirmed'):
+        flash("Action Required: Please update your contact info to unlock signups.", "danger")
+        return redirect(url_for('index'))
+
+    # ENFORCEMENT: Restored Strike/Paused Logic
+    m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{user['code']}'")
+    if m_recs and m_recs[0]['fields'].get('Paused'):
+        flash("🚫 Your account is paused due to strikes. Please contact Jim.", "danger")
+        return redirect(url_for('index'))
     
     existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
     if existing:
         flash("You are already signed up!", "warning")
         return redirect(url_for('index'))
 
-    payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": int(user['code']), "Email": user['email']}}
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload)
-    AIRTABLE_CACHE.clear()
-    log_activity(user['first'], "Signed Up")
+    # BUG FIX: Player Code cast to string (str) instead of int to match Airtable structure
+    payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email']}}
+    
+    try:
+        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload).raise_for_status()
+        AIRTABLE_CACHE.clear()
+        log_activity(user['first'], "Signed Up")
+        flash("You've been added to the list!", "success")
+    except Exception as e:
+        print(f"Signup failed: {e}")
+        flash("Error saving signup to the database. Please try again or contact Jim.", "danger")
+
     return redirect(url_for('index'))
 
 @app.route('/cancel', methods=['POST'])
@@ -260,10 +277,13 @@ def cancel():
 
 @app.route('/accept_sub', methods=['POST'])
 def accept_sub():
-    if not session.get('user'): return redirect(url_for('index'))
+    user = session.get('user')
+    if not user: return redirect(url_for('index'))
+    if not user.get('contact_confirmed'): return redirect(url_for('index')) # Server enforcement
+
     recs = get_airtable_data("Signups")
-    dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(session['user']['code'])), None)
-    me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
+    dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(user['code'])), None)
+    me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
     if dropper and me:
         dropper_name = dropper['fields'].get('First')
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{dropper['id']}", headers=HEADERS)
@@ -287,24 +307,19 @@ def update_profile():
     user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(user['code'])), None)
     
     if user_rec:
-        # Save to Airtable and stamp today's date
         today_str = dt.date.today().strftime("%Y-%m-%d")
         payload = {"fields": {"Email": new_email, "Phone": new_phone, "Last Confirmed": today_str}}
-        
         try:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", 
-                           headers=HEADERS, json=payload).raise_for_status()
-        except Exception as e:
-            # Fallback if the Last Confirmed column doesn't exist yet
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", 
-                           headers=HEADERS, json={"fields": {"Email": new_email, "Phone": new_phone}})
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", headers=HEADERS, json=payload).raise_for_status()
+        except:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", headers=HEADERS, json={"fields": {"Email": new_email, "Phone": new_phone}})
 
         session['user']['email'] = new_email
         session['user']['phone'] = new_phone
         session['user']['contact_confirmed'] = True 
         session.modified = True
         AIRTABLE_CACHE.clear()
-        flash("Profile confirmed and updated!", "success")
+        flash("Profile confirmed and updated! Site unlocked.", "success")
     return redirect(url_for('index'))
 
 @app.route('/apply', methods=['POST'])
@@ -318,6 +333,8 @@ def apply():
 def request_guest():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
+    if not user.get('contact_confirmed'): return redirect(url_for('index')) # Server enforcement
+
     payload = {"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending"}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
     flash("Guest request submitted to Admin.", "info")
@@ -376,7 +393,17 @@ def approve_guest(app_id):
 @app.route('/attendance/<code_str>', methods=['POST'])
 def attendance(code_str):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": request.form.get('status'), "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
+    
+    # RESTORED: Full Strike tracking logic
+    status = request.form.get('status')
+    strike_inc = 1 if status == 'Late' else 2 if status == 'No Show' else 0
+    m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code_str}'")
+    
+    if m_recs and strike_inc > 0:
+        new_strikes = m_recs[0]['fields'].get('Strikes', 0) + strike_inc
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
+
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": status, "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
     flash(f"Updated attendance for {code_str}", "info")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
