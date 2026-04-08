@@ -163,10 +163,14 @@ def index():
 
 @app.route('/validate', methods=['POST'])
 def validate():
-    code = request.form.get('code')
+    code = str(request.form.get('code', '')).strip()
     password = request.form.get('password')
+    
+    # 1. Fetch entire Master List (bypasses Airtable formula type-matching bugs)
     master = get_airtable_data("Master List")
-    user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(code)), None)
+    
+    # 2. Securely search in Python
+    user_rec = next((m for m in master if str(m['fields'].get('Code', '')).strip() == code), None)
     
     if user_rec:
         is_admin = (password == ADMIN_PW)
@@ -186,7 +190,7 @@ def validate():
         
         session['user'] = {
             'code': code, 'first': f.get('First'), 'last': f.get('Last'),
-            'email': f.get('Email'), 'phone': f.get('Phone'), 'is_admin': is_admin,
+            'email': f.get('Email', ''), 'phone': f.get('Phone', ''), 'is_admin': is_admin,
             'contact_confirmed': contact_confirmed
         }
         log_activity(f.get('First'), "Logged In")
@@ -279,7 +283,7 @@ def cancel():
 def accept_sub():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
-    if not user.get('contact_confirmed'): return redirect(url_for('index')) # Server enforcement
+    if not user.get('contact_confirmed'): return redirect(url_for('index'))
 
     recs = get_airtable_data("Signups")
     dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(user['code'])), None)
@@ -333,7 +337,7 @@ def apply():
 def request_guest():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
-    if not user.get('contact_confirmed'): return redirect(url_for('index')) # Server enforcement
+    if not user.get('contact_confirmed'): return redirect(url_for('index'))
 
     payload = {"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending"}}
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
@@ -394,7 +398,6 @@ def approve_guest(app_id):
 def attendance(code_str):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     
-    # RESTORED: Full Strike tracking logic
     status = request.form.get('status')
     strike_inc = 1 if status == 'Late' else 2 if status == 'No Show' else 0
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code_str}'")
