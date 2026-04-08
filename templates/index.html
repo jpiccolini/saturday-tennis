@@ -28,6 +28,13 @@
             </div>
         </div>
 
+        {% if session.get('user') and not session.user.get('contact_confirmed') %}
+            <div class="alert alert-danger shadow-sm text-center border-danger mb-4">
+                <h4 class="alert-heading fw-bold mb-1">🚨 Action Required!</h4>
+                <p class="mb-0">Your account is temporarily locked for its 6-month review. You must confirm your email and phone number to sign up for tennis.</p>
+            </div>
+        {% endif %}
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}
                 <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
@@ -46,6 +53,7 @@
                             </div>
                         </div>
                         <div class="card-body">
+                            
                             {% if session.user.get('is_admin') %}
                                 <div class="p-3 mb-3 text-start admin-sidebar-box">
                                     <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
@@ -72,28 +80,35 @@
                                 </div>
                             {% endif %}
 
-                            {% if pending_sub_offer %}
-                                <div class="alert alert-warning border-warning shadow-sm">
-                                    <h5 class="mb-1">Sub Spot!</h5>
-                                    <form action="/accept_sub" method="POST"><button class="btn btn-success w-100 fw-bold">Accept Spot</button></form>
+                            {% if not session.user.get('contact_confirmed') %}
+                                <button class="btn btn-danger btn-lg w-100 fw-bold shadow" data-bs-toggle="modal" data-bs-target="#profileModal">
+                                    Review Contact Info to Unlock
+                                </button>
+                            
+                            {% else %}
+                                {% if pending_sub_offer %}
+                                    <div class="alert alert-warning border-warning shadow-sm">
+                                        <h5 class="mb-1">Sub Spot!</h5>
+                                        <form action="/accept_sub" method="POST"><button class="btn btn-success w-100 fw-bold">Accept Spot</button></form>
+                                    </div>
+                                {% endif %}
+
+                                {% if user_on_roster %}
+                                    <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
+                                    <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel Spot</button></form>
+                                {% else %}
+                                    <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button></form>
+                                {% endif %}
+
+                                <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Request Guest</button>
+                                <div id="guestForm" class="collapse mt-2 text-start p-2 border rounded bg-light">
+                                    <form action="/request_guest" method="POST">
+                                        <input type="text" name="guest_first" class="form-control form-control-sm mb-1" placeholder="First Name" required>
+                                        <input type="text" name="guest_last" class="form-control form-control-sm mb-2" placeholder="Last Name" required>
+                                        <button class="btn btn-sm btn-info text-white w-100">Submit Request</button>
+                                    </form>
                                 </div>
                             {% endif %}
-
-                            {% if user_on_roster %}
-                                <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
-                                <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel Spot</button></form>
-                            {% else %}
-                                <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold">Sign Up to Play</button></form>
-                            {% endif %}
-
-                            <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Request Guest</button>
-                            <div id="guestForm" class="collapse mt-2 text-start p-2 border rounded bg-light">
-                                <form action="/request_guest" method="POST">
-                                    <input type="text" name="guest_first" class="form-control form-control-sm mb-1" placeholder="First Name" required>
-                                    <input type="text" name="guest_last" class="form-control form-control-sm mb-2" placeholder="Last Name" required>
-                                    <button class="btn btn-sm btn-info text-white w-100">Submit Request</button>
-                                </form>
-                            </div>
                         </div>
                     </div>
 
@@ -101,7 +116,7 @@
                         <div class="modal-dialog">
                             <form action="/update_profile" method="POST" class="modal-content">
                                 <div class="modal-header">
-                                    <h5 class="modal-title">{% if not session.user.get('contact_confirmed') %}Routine 6-Month Contact Review{% else %}Update Profile{% endif %}</h5>
+                                    <h5 class="modal-title text-danger fw-bold">{% if not session.user.get('contact_confirmed') %}Routine 6-Month Contact Review{% else %}Update Profile{% endif %}</h5>
                                     {% if session.user.get('contact_confirmed') %}<button type="button" class="btn-close" data-bs-dismiss="modal"></button>{% endif %}
                                 </div>
                                 <div class="modal-body text-start">
@@ -115,7 +130,7 @@
                                 </div>
                                 <div class="modal-footer">
                                     {% if session.user.get('contact_confirmed') %}<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>{% endif %}
-                                    <button type="submit" class="btn btn-success">{% if not session.user.get('contact_confirmed') %}Confirm & Save{% else %}Save Changes{% endif %}</button>
+                                    <button type="submit" class="btn btn-success fw-bold">{% if not session.user.get('contact_confirmed') %}Confirm & Unlock Site{% else %}Save Changes{% endif %}</button>
                                 </div>
                             </form>
                         </div>
