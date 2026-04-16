@@ -149,37 +149,47 @@ def index():
         
         target_day = None
         # 2. Normalize the Airtable date for comparison
-        # This handles "Apr 17", "Apr 17, 2026", or "April 17"
         clean_d_date = d_date.split(',')[0].strip().lower() 
 
         for d in w_res['forecast']['forecastday']:
             api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
-            # Create a list of possible matches from the API date
             possible_formats = [
-                api_dt.strftime('%b %d').lower(),          # "apr 17"
-                api_dt.strftime('%b %d').replace(' 0', ' ').lower(), # "apr 17" (no leading zero)
-                api_dt.strftime('%B %d').lower(),         # "april 17"
-                api_dt.strftime('%B %d').replace(' 0', ' ').lower()  # "april 17"
+                api_dt.strftime('%b %d').lower(),
+                api_dt.strftime('%b %d').replace(' 0', ' ').lower(),
+                api_dt.strftime('%B %d').lower(),
+                api_dt.strftime('%B %d').replace(' 0', ' ').lower()
             ]
             
             if clean_d_date in possible_formats:
                 target_day = d
                 break
                 
+        if not target_day:
+            target_day = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
+            
         if target_day:
-            # 3. Dynamic Hour Selection based on start_time
-            s_hour = start_dt.hour if start_dt else 9
-            e_hour = min(s_hour + 2, 23) 
-            
-            cond = target_day['hour'][s_hour]['condition']['text']
-            temp_start = int(target_day['hour'][s_hour]['temp_f'])
-            temp_end = int(target_day['hour'][e_hour]['temp_f'])
-            
-            # Format the display label for the badge
-            end_label = (start_dt + timedelta(hours=2)).strftime('%I:%M %p').lstrip('0') if start_dt else "End"
-            weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
+            if start_dt:
+                # Dynamically calculate exact start and end hours
+                s_hour = start_dt.hour 
+                end_dt = start_dt + timedelta(hours=2, minutes=15)
+                e_hour = min(end_dt.hour, 23) # Cap at 11 PM to prevent API index errors
+                
+                cond = target_day['hour'][s_hour]['condition']['text']
+                temp_start = int(target_day['hour'][s_hour]['temp_f'])
+                temp_end = int(target_day['hour'][e_hour]['temp_f'])
+                
+                # Format the display label to match the actual 3:00 PM end time
+                end_label = end_dt.strftime('%I:%M %p').lstrip('0')
+                weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
+            else:
+                # Default fallback
+                s_hour, e_hour = 9, 11
+                cond = target_day['hour'][s_hour]['condition']['text']
+                temp_start = int(target_day['hour'][s_hour]['temp_f'])
+                temp_end = int(target_day['hour'][e_hour]['temp_f'])
+                weather_info = f"{cond} | Start: {temp_start}°F → End: {temp_end}°F"
     except Exception as e:
-        print(f"Weather Logic Error: {e}") # Log error for debugging
+        print(f"Weather Logic Error: {e}")
 
     applicants, guest_requests = [], []
     if curr_user and curr_user.get('is_admin'):
