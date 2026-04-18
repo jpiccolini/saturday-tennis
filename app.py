@@ -485,7 +485,24 @@ def cron_monday():
     send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p>Time: {d_start}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
     
     AIRTABLE_CACHE.clear()
-    return redirect(url_for('index'))
+    return "Monday reset and emails sent successfully.", 200
+
+@app.route('/cron/friday')
+def cron_friday():
+    settings = get_airtable_data("Settings")
+    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
+    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
+    
+    signups = get_airtable_data("Signups", sort_field="Created Time")
+    playing_cutoff = (min(len(signups), 24) // 4) * 4
+    
+    # Email only the players who made the cutoff (the active roster)
+    playing_emails = [r['fields'].get('Email') for i, r in enumerate(signups) if i < playing_cutoff and r['fields'].get('Email')]
+    
+    if playing_emails:
+        send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
+        
+    return "Friday reminder emails sent successfully.", 200
 
 if __name__ == '__main__':
     app.run(debug=True)
