@@ -23,15 +23,19 @@
             <p class="lead mb-1"><strong>{{ target_date }}</strong> | {{ start_time }}{{ end_time }}</p>
             <span class="badge bg-info text-dark shadow-sm fs-5 mb-2">{{ weather }}</span>
             <div>
-                <span class="badge bg-success fs-6 me-1">{{ playing_cutoff }} Playing</span>
-                <span class="badge bg-warning text-dark fs-6 me-1">{{ waitlist_count }} Waitlisted</span>
+                {% if play_mode == 'Split' %}
+                    <span class="badge bg-primary fs-6 me-1">SPLIT COURTS ACTIVE</span>
+                {% else %}
+                    <span class="badge bg-success fs-6 me-1">{{ playing_cutoff }} Playing</span>
+                    <span class="badge bg-warning text-dark fs-6 me-1">{{ waitlist_count }} Waitlisted</span>
+                {% endif %}
             </div>
         </div>
 
-        {% if session.get('user') and not session.user.get('contact_confirmed') %}
+        {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
             <div class="alert alert-danger shadow-sm text-center border-danger mb-4">
                 <h4 class="alert-heading fw-bold mb-1">🚨 Action Required!</h4>
-                <p class="mb-0">Your account is temporarily locked for its 6-month review. You must confirm your email and phone number to sign up for tennis.</p>
+                <p class="mb-0">Your account is temporarily locked. Please confirm your contact info and assign your play level to continue.</p>
             </div>
         {% endif %}
 
@@ -53,7 +57,6 @@
                             </div>
                         </div>
                         <div class="card-body">
-                            
                             {% if session.user.get('is_admin') %}
                                 <div class="p-3 mb-3 text-start admin-sidebar-box">
                                     <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
@@ -80,11 +83,10 @@
                                 </div>
                             {% endif %}
 
-                            {% if not session.user.get('contact_confirmed') %}
+                            {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}
                                 <button class="btn btn-danger btn-lg w-100 fw-bold shadow" data-bs-toggle="modal" data-bs-target="#profileModal">
-                                    Review Contact Info to Unlock
+                                    Review Profile to Unlock
                                 </button>
-                            
                             {% else %}
                                 {% if pending_sub_offer %}
                                     <div class="alert alert-warning border-warning shadow-sm">
@@ -112,25 +114,41 @@
                         </div>
                     </div>
 
-                    <div class="modal fade" id="profileModal" tabindex="-1" {% if not session.user.get('contact_confirmed') %}data-bs-backdrop="static" data-bs-keyboard="false"{% endif %}>
+                    <div class="modal fade" id="profileModal" tabindex="-1" {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}data-bs-backdrop="static" data-bs-keyboard="false"{% endif %}>
                         <div class="modal-dialog">
                             <form action="/update_profile" method="POST" class="modal-content">
                                 <div class="modal-header">
-                                    <h5 class="modal-title text-danger fw-bold">{% if not session.user.get('contact_confirmed') %}Routine 6-Month Contact Review{% else %}Update Profile{% endif %}</h5>
-                                    {% if session.user.get('contact_confirmed') %}<button type="button" class="btn-close" data-bs-dismiss="modal"></button>{% endif %}
+                                    <h5 class="modal-title {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}text-danger fw-bold{% endif %}">Profile Review</h5>
+                                    {% if session.user.get('contact_confirmed') and session.user.get('level') %}<button type="button" class="btn-close" data-bs-dismiss="modal"></button>{% endif %}
                                 </div>
                                 <div class="modal-body text-start">
                                     {% if not session.user.get('contact_confirmed') %}
-                                        <div class="alert alert-warning small">It's been a while! Please confirm or update your email and phone number to continue using the site. Both fields are required so subs can reach you.</div>
+                                        <div class="alert alert-warning small">Please confirm your email and phone number. Both are required so subs can reach you.</div>
                                     {% endif %}
+                                    
+                                    <div class="mb-3 p-3 bg-light border rounded">
+                                        <label class="form-label small fw-bold">Your Play Level</label>
+                                        {% if not session.user.get('level') %}
+                                            <p class="small text-muted mb-1">Select your level below. This locks your initial court routing for "Split Court" days.</p>
+                                            <select name="level" class="form-select" required>
+                                                <option value="" disabled selected>Select Level...</option>
+                                                <option value="3.0/3.5">3.0 / 3.5</option>
+                                                <option value="4.0/4.5">4.0 / 4.5</option>
+                                            </select>
+                                        {% else %}
+                                            <input type="text" class="form-control mb-1 fw-bold text-primary" value="{{ session.user.get('level') }}" disabled>
+                                            <small class="text-muted fst-italic">Contact admin to change your level.</small>
+                                        {% endif %}
+                                    </div>
+
                                     <label class="form-label small fw-bold">Email</label>
                                     <input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email', '') }}" required>
                                     <label class="form-label small fw-bold">Phone</label>
                                     <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}" required>
                                 </div>
                                 <div class="modal-footer">
-                                    {% if session.user.get('contact_confirmed') %}<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>{% endif %}
-                                    <button type="submit" class="btn btn-success fw-bold">{% if not session.user.get('contact_confirmed') %}Confirm & Unlock Site{% else %}Save Changes{% endif %}</button>
+                                    {% if session.user.get('contact_confirmed') and session.user.get('level') %}<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>{% endif %}
+                                    <button type="submit" class="btn btn-success fw-bold">{% if not session.user.get('contact_confirmed') or not session.user.get('level') %}Confirm & Unlock Site{% else %}Save Changes{% endif %}</button>
                                 </div>
                             </form>
                         </div>
@@ -165,31 +183,65 @@
                 <div class="card shadow mb-4">
                     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#rosterCollapse">
                         <h4 class="mb-0">Live Roster 🔽</h4>
-                        <span class="badge bg-secondary">{{ roster|length }} Signed Up</span>
                     </div>
                     <div id="rosterCollapse" class="collapse show">
-                        <div class="card-body p-2" style="background-color: #eee;">
-                            {% for player in roster %}
-                                {% if loop.index0 % 4 == 0 %}
-                                    {% if loop.index0 < playing_cutoff %}<h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
-                                    {% elif loop.index0 == playing_cutoff %}<h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist</h6>{% endif %}
-                                {% endif %}
-                                <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
-                                    <div>
-                                        <span class="fw-bold">{{ loop.index }}. {{ player.get('First', '') }} {{ player.get('Last', '') }}</span>
-                                        {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-2">{{ player.get('Label') }}</span>{% endif %}
-                                        {% if session.get('user') and session.user.get('is_admin') and player.get('strikes', 0) > 0 %}
-                                            <span class="badge bg-dark ms-1 admin-badge">{{ player.strikes }} ⚠️</span>
-                                        {% endif %}
-                                    </div>
-                                    {% if session.get('user') and session.user.get('is_admin') %}
-                                        <form action="/attendance/{{ player.get('Player Code') }}" method="POST"><input type="hidden" name="status" value="Played"><button class="btn btn-sm btn-outline-success">✅</button></form>
+                        <div class="card-body p-3" style="background-color: #eee;">
+                            
+                            {% if play_mode == 'Open' %}
+                                {% for player in roster %}
+                                    {% if loop.index0 % 4 == 0 %}
+                                        {% if loop.index0 < playing_cutoff %}<h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
+                                        {% elif loop.index0 == playing_cutoff %}<h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist</h6>{% endif %}
                                     {% endif %}
+                                    <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
+                                        <div>
+                                            <span class="fw-bold">{{ loop.index }}. {{ player.get('First', '') }} {{ player.get('Last', '') }}</span>
+                                            {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-2">{{ player.get('Label') }}</span>{% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                                {% if not roster %}<div class="text-center py-5 text-muted">No one has signed up yet.</div>{% endif %}
+                            
+                            {% else %}
+                                <div class="row">
+                                    <div class="col-md-6 mb-4">
+                                        <div class="p-2 bg-white rounded shadow-sm border">
+                                            <h5 class="text-center text-primary fw-bold mb-3 border-bottom pb-2">3.0 / 3.5 Courts</h5>
+                                            {% for player in lower_roster %}
+                                                {% if loop.index0 % 4 == 0 %}
+                                                    {% if loop.index0 < lower_cutoff %}<h6 class="mt-2 text-success fw-bold small">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
+                                                    {% elif loop.index0 == lower_cutoff %}<h6 class="mt-3 text-warning fw-bold small">⏳ Waitlist</h6>{% endif %}
+                                                {% endif %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded bg-light small {% if loop.index0 >= lower_cutoff %}waitlist-card{% else %}roster-card{% endif %}">
+                                                    <span><b>{{ loop.index }}.</b> {{ player.get('First', '') }} {{ player.get('Last', '') }}
+                                                        {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
+                                                    </span>
+                                                </div>
+                                            {% endfor %}
+                                            {% if not lower_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6 mb-4">
+                                        <div class="p-2 bg-white rounded shadow-sm border">
+                                            <h5 class="text-center text-danger fw-bold mb-3 border-bottom pb-2">4.0 / 4.5 Courts</h5>
+                                            {% for player in upper_roster %}
+                                                {% if loop.index0 % 4 == 0 %}
+                                                    {% if loop.index0 < upper_cutoff %}<h6 class="mt-2 text-success fw-bold small">🎾 Court {{ (loop.index0 // 4) + 4 }}</h6>
+                                                    {% elif loop.index0 == upper_cutoff %}<h6 class="mt-3 text-warning fw-bold small">⏳ Waitlist</h6>{% endif %}
+                                                {% endif %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded bg-light small {% if loop.index0 >= upper_cutoff %}waitlist-card{% else %}roster-card{% endif %}">
+                                                    <span><b>{{ loop.index }}.</b> {{ player.get('First', '') }} {{ player.get('Last', '') }}
+                                                        {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
+                                                    </span>
+                                                </div>
+                                            {% endfor %}
+                                            {% if not upper_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
+                                        </div>
+                                    </div>
                                 </div>
-                            {% endfor %}
-                            {% if not roster %}
-                                <div class="text-center py-5 text-muted">No one has signed up yet.</div>
                             {% endif %}
+                            
                         </div>
                     </div>
                 </div>
@@ -208,7 +260,7 @@
                             <div class="col-6">
                                 <h6 class="text-info fw-bold">Guests</h6>
                                 {% for guest in guest_requests %}
-                                    <div class="p-2 border rounded mb-2 bg-light small">{{ guest.fields.get('First') }}<br><small>Sponsor: {{ guest.fields.get('Sponsor') }}</small><form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-info text-white w-100">Approve</button></form></div>
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ guest.fields.get('First') }} ({{ guest.fields.get('Level') }})<br><small>Sponsor: {{ guest.fields.get('Sponsor') }}</small><form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-info text-white w-100">Approve</button></form></div>
                                 {% endfor %}
                             </div>
                         </div>
@@ -229,11 +281,12 @@
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0" id="directoryTable">
-                        <thead class="table-light"><tr><th>Name</th><th>Contact Info</th></tr></thead>
+                        <thead class="table-light"><tr><th>Name</th><th>Level</th><th>Contact Info</th></tr></thead>
                         <tbody>
                             {% for p in master_list %}
                             <tr {% if p.fields.get('Paused') %}class="table-danger"{% endif %}>
                                 <td>{{ p.fields.get('First') }} {{ p.fields.get('Last') }}</td>
+                                <td><span class="badge bg-secondary">{{ p.fields.get('Level', 'Unset') }}</span></td>
                                 <td><small class="text-muted">{{ p.fields.get('Email', 'No Email') }}<br>{{ p.fields.get('Phone', '') }}</small></td>
                             </tr>
                             {% endfor %}
@@ -248,8 +301,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Auto-trigger Mandatory Profile Modal if 6 months have passed
-            {% if session.get('user') and not session.user.get('contact_confirmed') %}
+            {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
                 var profileModal = new bootstrap.Modal(document.getElementById('profileModal'), {
                     backdrop: 'static',
                     keyboard: false
@@ -257,7 +309,6 @@
                 profileModal.show();
             {% endif %}
 
-            // Directory Search filter
             const searchInput = document.getElementById('directorySearch');
             if(searchInput) {
                 searchInput.addEventListener('keyup', function() {
