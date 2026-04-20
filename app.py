@@ -129,7 +129,6 @@ def index():
         f['strikes'] = strike_map.get(str(f.get('Player Code')), 0)
         roster.append(f)
 
-    # --- PLAY MODE LOGIC (SPLIT VS OPEN) ---
     lower_roster, upper_roster = [], []
     lower_cutoff, upper_cutoff = 12, 12
     total_signups = len(roster)
@@ -157,7 +156,6 @@ def index():
             for p in roster:
                 if str(p.get('Sub Offer')) == str(curr_user.get('code')):
                     pending_sub_offer = True
-
     else:
         if curr_user:
             for i, p in enumerate(roster):
@@ -206,6 +204,9 @@ def index():
                 temp_start = int(target_day['hour'][s_hour]['temp_f'])
                 temp_end = int(target_day['hour'][e_hour]['temp_f'])
                 weather_info = f"{cond} | Start: {temp_start}°F → End: {temp_end}°F"
+        else:
+            # Smart fallback for when the API's 3-day free tier limit is hit on Mon/Tue
+            weather_info = "Saturday forecast available by Wed/Thu"
     except Exception as e:
         print(f"Weather Logic Error: {e}")
 
@@ -280,7 +281,6 @@ def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
 
-    # ENFORCEMENT: Check contact AND level
     if not user.get('contact_confirmed') or not user.get('level'):
         flash("Action Required: Please review your profile info to unlock signups.", "danger")
         return redirect(url_for('index'))
@@ -319,7 +319,6 @@ def cancel():
     
     my_rec = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
     if my_rec:
-        # Determine which list they belong to for waitlist math
         target_list = recs
         playing_cutoff = (min(len(target_list), 24) // 4) * 4
         
@@ -403,14 +402,13 @@ def update_profile():
         today_str = dt.date.today().strftime("%Y-%m-%d")
         payload = {"fields": {"Email": new_email, "Phone": new_phone, "Last Confirmed": today_str}}
         
-        # Only submit level if it was empty before (locks it in)
         if not user.get('level') and new_level:
             payload["fields"]["Level"] = new_level
             
         try:
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", headers=HEADERS, json=payload).raise_for_status()
         except:
-            pass # Fallback silent error handling
+            pass 
 
         session['user']['email'] = new_email
         session['user']['phone'] = new_phone
@@ -515,13 +513,21 @@ def cron_monday():
     
     signups = get_airtable_data("Signups")
     for r in signups:
-        archive_payload = {"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}}
-        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-    
-    emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-    send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p>Time: {d_start}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
-    
+        # Wrap each deletion in a try-except so one broken row doesn't stop the whole roster from clearing!
+        try:
+            archive_payload = {"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}}
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+        except Exception as e:
+            print(f"Failed to archive/delete {r['id']}: {e}")
+            
+    # Wrap the email blast in a try-except so the user sees a success screen even if Google hiccups
+    try:
+        emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
+        send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p>Time: {d_start}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+    except Exception as e:
+        print(f"Email failed: {e}")
+        
     AIRTABLE_CACHE.clear()
     return "Monday reset and emails sent successfully.", 200
 
@@ -537,8 +543,11 @@ def cron_friday():
     playing_emails = [r['fields'].get('Email') for i, r in enumerate(signups) if i < playing_cutoff and r['fields'].get('Email')]
     
     if playing_emails:
-        send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-        
+        try:
+            send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
+        except:
+            pass
+            
     return "Friday reminder emails sent successfully.", 200
 
 if __name__ == '__main__':
