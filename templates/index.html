@@ -12,6 +12,8 @@
         .admin-sidebar-box { border: 1px solid #dc3545; background-color: #fffafa; border-radius: 8px; }
         .clickable-header { cursor: pointer; }
         .clickable-header:hover { opacity: 0.9; }
+        /* Make the switch button tiny so it fits nicely on mobile */
+        .btn-move { padding: 0.1rem 0.3rem; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -46,7 +48,7 @@
         {% endwith %}
 
         <div class="row">
-            <div class="col-md-5 mb-4">
+            <div class="col-lg-4 col-md-5 mb-4">
                 {% if session.get('user') %}
                     <div class="card shadow border-success mb-4 text-center">
                         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
@@ -60,7 +62,13 @@
                             {% if session.user.get('is_admin') %}
                                 <div class="p-3 mb-3 text-start admin-sidebar-box">
                                     <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
-                                    <h6 class="small fw-bold">📣 Message Blast</h6>
+                                    
+                                    <form action="/admin_action" method="POST" class="mb-3">
+                                        <input type="hidden" name="action" value="toggle_mode">
+                                        <button class="btn btn-sm btn-primary w-100 fw-bold shadow-sm">🔄 Switch to {% if play_mode == 'Open' %}Split{% else %}Open{% endif %} Mode</button>
+                                    </form>
+
+                                    <h6 class="small fw-bold mt-2">📣 Message Blast</h6>
                                     <form action="/info_blast" method="POST" class="mb-3">
                                         <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Message..." required></textarea>
                                         <select name="target_group" class="form-select form-select-sm mb-2">
@@ -179,8 +187,8 @@
                 {% endif %}
             </div>
 
-            <div class="col-md-7">
-                <div class="card shadow mb-4">
+            <div class="col-lg-8 col-md-7">
+                <div class="card shadow mb-4 border-dark">
                     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#rosterCollapse">
                         <h4 class="mb-0">Live Roster 🔽</h4>
                     </div>
@@ -205,8 +213,10 @@
                             {% else %}
                                 <div class="row">
                                     <div class="col-md-6 mb-4">
-                                        <div class="p-2 bg-white rounded shadow-sm border">
-                                            <h5 class="text-center text-primary fw-bold mb-3 border-bottom pb-2">3.0 / 3.5 Courts</h5>
+                                        <div class="p-2 bg-white rounded shadow-sm border h-100">
+                                            <h5 class="text-center text-primary fw-bold mb-0">3.0 / 3.5 Courts</h5>
+                                            <p class="text-center small text-muted border-bottom pb-2 mb-2">3 Courts Reserved</p>
+                                            
                                             {% for player in lower_roster %}
                                                 {% if loop.index0 % 4 == 0 %}
                                                     {% if loop.index0 < lower_cutoff %}<h6 class="mt-2 text-success fw-bold small">🎾 Court {{ (loop.index0 // 4) + 1 }}</h6>
@@ -216,6 +226,12 @@
                                                     <span><b>{{ loop.index }}.</b> {{ player.get('First', '') }} {{ player.get('Last', '') }}
                                                         {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
                                                     </span>
+                                                    {% if session.get('user') and session.user.get('is_admin') %}
+                                                        <form action="/move_player/{{ player.id }}" method="POST" class="m-0 p-0">
+                                                            <input type="hidden" name="current_level" value="3.0/3.5">
+                                                            <button type="submit" class="btn btn-outline-dark btn-move" title="Move to 4.0/4.5 Group">↔️</button>
+                                                        </form>
+                                                    {% endif %}
                                                 </div>
                                             {% endfor %}
                                             {% if not lower_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
@@ -223,8 +239,10 @@
                                     </div>
 
                                     <div class="col-md-6 mb-4">
-                                        <div class="p-2 bg-white rounded shadow-sm border">
-                                            <h5 class="text-center text-danger fw-bold mb-3 border-bottom pb-2">4.0 / 4.5 Courts</h5>
+                                        <div class="p-2 bg-white rounded shadow-sm border h-100">
+                                            <h5 class="text-center text-danger fw-bold mb-0">4.0 / 4.5 Courts</h5>
+                                            <p class="text-center small text-muted border-bottom pb-2 mb-2">3 Courts Reserved</p>
+                                            
                                             {% for player in upper_roster %}
                                                 {% if loop.index0 % 4 == 0 %}
                                                     {% if loop.index0 < upper_cutoff %}<h6 class="mt-2 text-success fw-bold small">🎾 Court {{ (loop.index0 // 4) + 4 }}</h6>
@@ -234,6 +252,12 @@
                                                     <span><b>{{ loop.index }}.</b> {{ player.get('First', '') }} {{ player.get('Last', '') }}
                                                         {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
                                                     </span>
+                                                    {% if session.get('user') and session.user.get('is_admin') %}
+                                                        <form action="/move_player/{{ player.id }}" method="POST" class="m-0 p-0">
+                                                            <input type="hidden" name="current_level" value="4.0/4.5">
+                                                            <button type="submit" class="btn btn-outline-dark btn-move" title="Move to 3.0/3.5 Group">↔️</button>
+                                                        </form>
+                                                    {% endif %}
                                                 </div>
                                             {% endfor %}
                                             {% if not upper_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
@@ -299,27 +323,3 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
-                var profileModal = new bootstrap.Modal(document.getElementById('profileModal'), {
-                    backdrop: 'static',
-                    keyboard: false
-                });
-                profileModal.show();
-            {% endif %}
-
-            const searchInput = document.getElementById('directorySearch');
-            if(searchInput) {
-                searchInput.addEventListener('keyup', function() {
-                    const filter = this.value.toLowerCase();
-                    const rows = document.querySelectorAll('#directoryTable tbody tr');
-                    rows.forEach(row => {
-                        row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
-                    });
-                });
-            }
-        });
-    </script>
-</body>
-</html>
