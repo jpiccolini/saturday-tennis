@@ -205,8 +205,7 @@ def index():
                 temp_end = int(target_day['hour'][e_hour]['temp_f'])
                 weather_info = f"{cond} | Start: {temp_start}°F → End: {temp_end}°F"
         else:
-            # Smart fallback for when the API's 3-day free tier limit is hit on Mon/Tue
-            weather_info = "Saturday forecast available by Wed/Thu"
+            weather_info = "Saturday forecast available on Thursday"
     except Exception as e:
         print(f"Weather Logic Error: {e}")
 
@@ -442,14 +441,31 @@ def request_guest():
 def admin_action():
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     action = request.form.get('action')
-    if action == "labels":
-        settings = get_airtable_data("Settings")
-        if settings:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
-            flash("Session info updated!", "success")
+    settings = get_airtable_data("Settings")
+    
+    if action == "labels" and settings:
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
+        flash("Session info updated!", "success")
+    elif action == "toggle_mode" and settings:
+        current_mode = settings[0]['fields'].get('Play Mode', 'Open')
+        new_mode = 'Split' if current_mode == 'Open' else 'Open'
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Play Mode": new_mode}})
+        flash(f"Mode switched to {new_mode}!", "success")
     elif action == "reset_roster":
         return cron_monday() 
+        
     AIRTABLE_CACHE.clear()
+    return redirect(url_for('index'))
+
+@app.route('/move_player/<signup_id>', methods=['POST'])
+def move_player(signup_id):
+    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
+    current_level = request.form.get('current_level')
+    new_level = '4.0/4.5' if current_level == '3.0/3.5' else '3.0/3.5'
+    
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{signup_id}", headers=HEADERS, json={"fields": {"Level": new_level}})
+    AIRTABLE_CACHE.clear()
+    flash("Player moved successfully to balance courts!", "success")
     return redirect(url_for('index'))
 
 @app.route('/info_blast', methods=['POST'])
@@ -510,10 +526,15 @@ def cron_monday():
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
+    play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
     
+    # CUSTOM EMAIL TEXT LOGIC
+    mode_explanation = "This week we are in <b>Open</b> mode, all members in one list."
+    if play_mode == 'Split':
+        mode_explanation = "This week we are in <b>Split</b> mode, with 3 courts reserved for each group. <br><i>(I may shift numbers on Friday to a 4 court/2 court arrangement if numbers support it.)</i>"
+
     signups = get_airtable_data("Signups")
     for r in signups:
-        # Wrap each deletion in a try-except so one broken row doesn't stop the whole roster from clearing!
         try:
             archive_payload = {"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}}
             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
@@ -521,10 +542,16 @@ def cron_monday():
         except Exception as e:
             print(f"Failed to archive/delete {r['id']}: {e}")
             
-    # Wrap the email blast in a try-except so the user sees a success screen even if Google hiccups
     try:
         emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p>Time: {d_start}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+        
+        email_html = f"""
+        <h3>Signups are open!</h3>
+        <p><b>Time:</b> {d_start}</p>
+        <p>{mode_explanation}</p>
+        <p><a href='{SITE_URL}'>Claim your spot!</a></p>
+        """
+        send_email(emails, f"🎾 Signups OPEN for {d_date}!", email_html, is_multiple=True)
     except Exception as e:
         print(f"Email failed: {e}")
         
