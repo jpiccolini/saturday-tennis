@@ -226,15 +226,11 @@ def index():
 def validate():
     code = str(request.form.get('code', '')).strip()
     password = request.form.get('password')
-    
     master = get_airtable_data("Master List")
-    
     user_rec = None
     for m in master:
         m_code = str(m['fields'].get('Code', '')).strip()
-        if m_code.endswith('.0'): 
-            m_code = m_code[:-2]
-        
+        if m_code.endswith('.0'): m_code = m_code[:-2]
         if m_code == code:
             user_rec = m
             break
@@ -242,30 +238,23 @@ def validate():
     if user_rec:
         is_admin = (password == ADMIN_PW)
         f = user_rec['fields']
-        
         last_confirmed_str = f.get('Last Confirmed')
         contact_confirmed = False
-        
         if last_confirmed_str:
             try:
                 last_conf_date = dt.datetime.strptime(last_confirmed_str, "%Y-%m-%d").date()
-                days_since = (dt.date.today() - last_conf_date).days
-                if days_since < 180:
-                    contact_confirmed = True
+                if (dt.date.today() - last_conf_date).days < 180: contact_confirmed = True
             except: pass
-        
         session['user'] = {
             'code': code, 'first': f.get('First'), 'last': f.get('Last'),
             'email': f.get('Email', ''), 'phone': f.get('Phone', ''), 'is_admin': is_admin,
-            'contact_confirmed': contact_confirmed,
-            'level': f.get('Level', '')
+            'contact_confirmed': contact_confirmed, 'level': f.get('Level', '')
         }
         log_activity(f.get('First'), "Logged In")
         return redirect(url_for('index'))
     else:
         log_activity(f"Failed Code Attempt: '{code}'", "Login Error")
-        alert_msg = f"<p>A user just attempted to log in to the Tennis site with an invalid code: <b>{code}</b>.</p>"
-        send_email(ADMIN_EMAIL, "⚠️ Failed Login Attempt", alert_msg)
+        send_email(ADMIN_EMAIL, "⚠️ Failed Login Attempt", f"<p>A user just attempted to log in with an invalid code: <b>{code}</b>.</p>")
         flash("Invalid Player Code.", "danger")
         return redirect(url_for('index'))
 
@@ -295,15 +284,13 @@ def signup():
         return redirect(url_for('index'))
 
     payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email'], "Level": user['level']}}
-    
     try:
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload).raise_for_status()
         AIRTABLE_CACHE.clear()
         log_activity(user['first'], "Signed Up")
         flash("You've been added to the list!", "success")
-    except Exception as e:
+    except:
         flash("Error saving signup to the database. Please try again or contact Jim.", "danger")
-
     return redirect(url_for('index'))
 
 @app.route('/cancel', methods=['POST'])
@@ -326,10 +313,8 @@ def cancel():
             target_list = [r for r in recs if r['fields'].get('Level') == my_level]
             playing_cutoff = (min(len(target_list), 12) // 4) * 4
 
-        try:
-            idx = target_list.index(my_rec)
-        except ValueError:
-            idx = -1
+        try: idx = target_list.index(my_rec)
+        except: idx = -1
             
         if idx != -1:
             is_in_complete_court = idx < playing_cutoff
@@ -342,8 +327,7 @@ def cancel():
                     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{promo_code}'")
                     promo_email = m_recs[0]['fields'].get('Email') if m_recs else None
 
-                    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS, 
-                                   json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
+                    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS, json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
                     if promo_email:
                         send_email(promo_email, "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
                         flash("Drop initiated. Waitlisted player emailed.", "warning")
@@ -364,8 +348,7 @@ def cancel():
 @app.route('/accept_sub', methods=['POST'])
 def accept_sub():
     user = session.get('user')
-    if not user: return redirect(url_for('index'))
-    if not user.get('contact_confirmed') or not user.get('level'): return redirect(url_for('index'))
+    if not user or not user.get('contact_confirmed') or not user.get('level'): return redirect(url_for('index'))
 
     recs = get_airtable_data("Signups")
     dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(user['code'])), None)
@@ -383,36 +366,21 @@ def update_profile():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
     
-    new_email, new_phone = request.form.get('email'), request.form.get('phone')
-    new_level = request.form.get('level')
-    
+    new_email, new_phone, new_level = request.form.get('email'), request.form.get('phone'), request.form.get('level')
     if not new_email or not new_phone:
-        flash("Both Email and Phone are required.", "danger")
-        return redirect(url_for('index'))
-        
+        flash("Both Email and Phone are required.", "danger"); return redirect(url_for('index'))
     if not user.get('level') and not new_level:
-        flash("Play Level is required.", "danger")
-        return redirect(url_for('index'))
+        flash("Play Level is required.", "danger"); return redirect(url_for('index'))
 
     master = get_airtable_data("Master List")
     user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(user['code'])), None)
-    
     if user_rec:
         today_str = dt.date.today().strftime("%Y-%m-%d")
         payload = {"fields": {"Email": new_email, "Phone": new_phone, "Last Confirmed": today_str}}
-        
-        if not user.get('level') and new_level:
-            payload["fields"]["Level"] = new_level
-            
-        try:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", headers=HEADERS, json=payload).raise_for_status()
-        except:
-            pass 
-
-        session['user']['email'] = new_email
-        session['user']['phone'] = new_phone
-        session['user']['contact_confirmed'] = True 
-        session['user']['level'] = new_level or user.get('level')
+        if not user.get('level') and new_level: payload["fields"]["Level"] = new_level
+        try: requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", headers=HEADERS, json=payload)
+        except: pass 
+        session['user'].update({'email': new_email, 'phone': new_phone, 'contact_confirmed': True, 'level': new_level or user.get('level')})
         session.modified = True
         AIRTABLE_CACHE.clear()
         flash("Profile updated! Site unlocked.", "success")
@@ -420,19 +388,15 @@ def update_profile():
 
 @app.route('/apply', methods=['POST'])
 def apply():
-    payload = {"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Status": "Pending"}}
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Status": "Pending"}})
     flash("Application submitted! We will email you your code once approved.", "success")
     return redirect(url_for('index'))
 
 @app.route('/request_guest', methods=['POST'])
 def request_guest():
     user = session.get('user')
-    if not user: return redirect(url_for('index'))
-    if not user.get('contact_confirmed'): return redirect(url_for('index'))
-
-    payload = {"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending", "Level": user.get('level', '')}}
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json=payload)
+    if not user or not user.get('contact_confirmed'): return redirect(url_for('index'))
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending", "Level": user.get('level', '')}})
     flash("Guest request submitted to Admin. They will be placed in your play level.", "info")
     return redirect(url_for('index'))
 
@@ -442,27 +406,22 @@ def admin_action():
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     action = request.form.get('action')
     settings = get_airtable_data("Settings")
-    
     if action == "labels" and settings:
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
         flash("Session info updated!", "success")
     elif action == "toggle_mode" and settings:
-        current_mode = settings[0]['fields'].get('Play Mode', 'Open')
-        new_mode = 'Split' if current_mode == 'Open' else 'Open'
+        new_mode = 'Split' if settings[0]['fields'].get('Play Mode', 'Open') == 'Open' else 'Open'
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Play Mode": new_mode}})
         flash(f"Mode switched to {new_mode}!", "success")
     elif action == "reset_roster":
         return cron_monday() 
-        
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
 @app.route('/move_player/<signup_id>', methods=['POST'])
 def move_player(signup_id):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    current_level = request.form.get('current_level')
-    new_level = '4.0/4.5' if current_level == '3.0/3.5' else '3.0/3.5'
-    
+    new_level = '4.0/4.5' if request.form.get('current_level') == '3.0/3.5' else '3.0/3.5'
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{signup_id}", headers=HEADERS, json={"fields": {"Level": new_level}})
     AIRTABLE_CACHE.clear()
     flash("Player moved successfully to balance courts!", "success")
@@ -506,21 +465,24 @@ def approve_guest(app_id):
 @app.route('/attendance/<code_str>', methods=['POST'])
 def attendance(code_str):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    
     status = request.form.get('status')
     strike_inc = 1 if status == 'Late' else 2 if status == 'No Show' else 0
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code_str}'")
-    
     if m_recs and strike_inc > 0:
         new_strikes = m_recs[0]['fields'].get('Strikes', 0) + strike_inc
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
-
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": status, "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
     flash(f"Updated attendance for {code_str}", "info")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
 # === SECTION 7: CRON / AUTOMATION ===
+
+# Helper for friendly numbers (1st, 2nd, 3rd)
+def get_ordinal(n):
+    if 11 <= (n % 100) <= 13: return str(n) + 'th'
+    return str(n) + {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+
 @app.route('/cron/monday')
 def cron_monday():
     settings = get_airtable_data("Settings")
@@ -528,7 +490,6 @@ def cron_monday():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
     
-    # CUSTOM EMAIL TEXT LOGIC
     mode_explanation = "This week we are in <b>Open</b> mode, all members in one list."
     if play_mode == 'Split':
         mode_explanation = "This week we are in <b>Split</b> mode, with 3 courts reserved for each group. <br><i>(I may shift numbers on Friday to a 4 court/2 court arrangement if numbers support it.)</i>"
@@ -536,45 +497,97 @@ def cron_monday():
     signups = get_airtable_data("Signups")
     for r in signups:
         try:
-            archive_payload = {"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}}
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json=archive_payload)
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}})
             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-        except Exception as e:
-            print(f"Failed to archive/delete {r['id']}: {e}")
+        except: pass
             
     try:
         emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        
-        email_html = f"""
-        <h3>Signups are open!</h3>
-        <p><b>Time:</b> {d_start}</p>
-        <p>{mode_explanation}</p>
-        <p><a href='{SITE_URL}'>Claim your spot!</a></p>
-        """
-        send_email(emails, f"🎾 Signups OPEN for {d_date}!", email_html, is_multiple=True)
-    except Exception as e:
-        print(f"Email failed: {e}")
+        send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p><b>Time:</b> {d_start}</p><p>{mode_explanation}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+    except: pass
         
     AIRTABLE_CACHE.clear()
     return "Monday reset and emails sent successfully.", 200
+
 
 @app.route('/cron/friday')
 def cron_friday():
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
+    play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
     
     signups = get_airtable_data("Signups", sort_field="Created Time")
-    playing_cutoff = (min(len(signups), 24) // 4) * 4
+    master_list = get_airtable_data("Master List")
+    all_emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
     
-    playing_emails = [r['fields'].get('Email') for i, r in enumerate(signups) if i < playing_cutoff and r['fields'].get('Email')]
-    
-    if playing_emails:
-        try:
+    if play_mode == 'Open':
+        total = len(signups)
+        playing_cutoff = (min(total, 24) // 4) * 4
+        playing_recs = signups[:playing_cutoff]
+        waitlist_recs = signups[playing_cutoff:]
+        
+        C = total // 4
+        W = total - playing_cutoff 
+        needed = 4 - (total % 4) if total % 4 != 0 else 4
+        
+        big_picture = f"We have {W} on the waitlist, so if {needed} more join us, we will add a {get_ordinal(C + 1)} court!"
+        
+        # 1. Email Playing
+        playing_emails = [r['fields'].get('Email') for r in playing_recs if r['fields'].get('Email')]
+        if playing_emails:
             send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-        except:
-            pass
             
+        # 2. Email Waitlist Individually
+        for idx, r in enumerate(waitlist_recs):
+            em = r['fields'].get('Email')
+            if em:
+                send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(waitlist_recs)}</b> on the Open waitlist.</p><p>Keep an eye out for sub requests! {C} courts are currently reserved.</p>")
+                
+        # 3. Email Big Picture Blast
+        send_email(all_emails, "🎾 Friday Update: Need more players!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+
+    else: 
+        # SPLIT MODE LOGIC
+        lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
+        upper = [s for s in signups if s['fields'].get('Level') == '4.0/4.5']
+        
+        l_cutoff = (min(len(lower), 12) // 4) * 4
+        u_cutoff = (min(len(upper), 12) // 4) * 4
+        
+        l_play, l_wait = lower[:l_cutoff], lower[l_cutoff:]
+        u_play, u_wait = upper[:u_cutoff], upper[u_cutoff:]
+        
+        l_C, u_C = len(lower) // 4, len(upper) // 4
+        l_needed = 4 - (len(lower) % 4) if len(lower) % 4 != 0 else 4
+        u_needed = 4 - (len(upper) % 4) if len(upper) % 4 != 0 else 4
+        
+        l_status = f"we are full on 3.0/3.5 with {len(l_wait)} on the waitlist, so if {l_needed} more join, we will add a {get_ordinal(l_C + 1)} court for 3.0/3.5."
+        if len(l_wait) == 0 and len(lower) < 12:
+            l_status = f"we have {len(lower)} players for 3.0/3.5. If {l_needed} more join, we will add a {get_ordinal(l_C + 1)} court."
+            
+        u_status = f"we have {len(u_wait)} on the 4.0/4.5 waitlist, so if {u_needed} more join, we will add a {get_ordinal(u_C + 1)} court."
+        if len(u_wait) == 0 and len(upper) < 12:
+            u_status = f"we have {len(upper)} players for 4.0/4.5. If {u_needed} more join, we will add a {get_ordinal(u_C + 1)} court."
+        
+        big_picture = f"This week we are in Split mode. For the big picture: {l_status} And {u_status} <i>(We may shift to a 4 court / 2 court arrangement if the numbers support it!)</i>"
+
+        # 1. Email Playing
+        playing_emails = [r['fields'].get('Email') for r in (l_play + u_play) if r['fields'].get('Email')]
+        if playing_emails:
+            send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
+            
+        # 2. Email Waitlists Individually
+        for idx, r in enumerate(l_wait):
+            em = r['fields'].get('Email')
+            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(l_wait)}</b> on the 3.0/3.5 waitlist.</p><p>Keep an eye out for sub requests! {l_cutoff//4} courts are currently reserved for your level.</p>")
+        for idx, r in enumerate(u_wait):
+            em = r['fields'].get('Email')
+            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_cutoff//4} courts are currently reserved for your level.</p>")
+
+        # 3. Email Big Picture Blast
+        send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend:</p><p><b>{big_picture}</b></p><p>If you can play, jump in and help us fill out the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+        
     return "Friday reminder emails sent successfully.", 200
 
 if __name__ == '__main__':
