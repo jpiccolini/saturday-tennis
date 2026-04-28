@@ -24,7 +24,7 @@ app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
 API_KEY = os.environ.get("AIRTABLE_API_KEY")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
 ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
-W_KEY = os.environ.get("WEATHER_API_KEY")
+W_KEY = os.environ.get("WEATHER_API_KEY") # No longer strictly needed for Open-Meteo, kept for legacy
 FROM_EMAIL = os.environ.get("FROM_EMAIL") 
 GMAIL_PW = os.environ.get("GMAIL_PASSWORD") 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", FROM_EMAIL) 
@@ -167,45 +167,51 @@ def index():
 
     weather_info = "Weather Unavailable"
     try:
-        w_res = requests.get(f"https://api.weatherapi.com/v1/forecast.json?key={W_KEY}&q=80026&days=8").json()
-        target_day = None
-        clean_d_date = d_date.split(',')[0].strip().lower() 
+        # Open-Meteo - 14-day forecast, Free, No API Key required
+        lat, lon = "39.9936", "-105.0897" # Lafayette, CO Coordinates
+        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,weathercode&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=14"
+        w_res = requests.get(weather_url).json()
 
-        for d in w_res['forecast']['forecastday']:
-            api_dt = dt.datetime.strptime(d['date'], '%Y-%m-%d')
-            possible_formats = [
-                api_dt.strftime('%b %d').lower(),
-                api_dt.strftime('%b %d').replace(' 0', ' ').lower(),
-                api_dt.strftime('%B %d').lower(),
-                api_dt.strftime('%B %d').replace(' 0', ' ').lower()
-            ]
-            if clean_d_date in possible_formats:
-                target_day = d
-                break
-                
-        if not target_day:
-            target_day = next((d for d in w_res['forecast']['forecastday'] if dt.datetime.strptime(d['date'], '%Y-%m-%d').weekday() == 5), None)
+        # Calculate the upcoming Saturday based on today
+        today = dt.date.today()
+        days_ahead = 5 - today.weekday()
+        if days_ahead < 0: days_ahead += 7
+        target_date = today + dt.timedelta(days=days_ahead)
+        target_date_iso = target_date.isoformat() 
             
-        if target_day:
-            if start_dt:
-                s_hour = start_dt.hour 
-                end_dt = start_dt + timedelta(hours=2, minutes=15)
-                e_hour = min(end_dt.hour, 23) 
-                
-                cond = target_day['hour'][s_hour]['condition']['text']
-                temp_start = int(target_day['hour'][s_hour]['temp_f'])
-                temp_end = int(target_day['hour'][e_hour]['temp_f'])
-                
-                end_label = end_dt.strftime('%I:%M %p').lstrip('0')
-                weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
-            else:
-                s_hour, e_hour = 9, 11
-                cond = target_day['hour'][s_hour]['condition']['text']
-                temp_start = int(target_day['hour'][s_hour]['temp_f'])
-                temp_end = int(target_day['hour'][e_hour]['temp_f'])
-                weather_info = f"{cond} | Start: {temp_start}°F → End: {temp_end}°F"
+        s_hour = start_dt.hour if start_dt else 9
+        end_dt = start_dt + timedelta(hours=2, minutes=15) if start_dt else None
+        e_hour = min(end_dt.hour, 23) if end_dt else 11
+        
+        start_time_str = f"{target_date_iso}T{s_hour:02d}:00"
+        end_time_str = f"{target_date_iso}T{e_hour:02d}:00"
+
+        times = w_res.get('hourly', {}).get('time', [])
+        temps = w_res.get('hourly', {}).get('temperature_2m', [])
+        codes = w_res.get('hourly', {}).get('weathercode', [])
+
+        if start_time_str in times:
+            s_idx = times.index(start_time_str)
+            e_idx = times.index(end_time_str) if end_time_str in times else s_idx + 2
+            
+            temp_start = int(temps[s_idx])
+            temp_end = int(temps[e_idx])
+            w_code = codes[s_idx]
+            
+            # WMO Weather code mapping
+            code_map = {
+                0: "Clear", 1: "Mostly Clear", 2: "Partly Cloudy", 3: "Overcast",
+                45: "Fog", 48: "Fog", 51: "Drizzle", 53: "Drizzle", 55: "Drizzle",
+                61: "Rain", 63: "Rain", 65: "Heavy Rain", 71: "Snow", 73: "Snow",
+                75: "Heavy Snow", 95: "Thunderstorm"
+            }
+            cond = code_map.get(w_code, "Varied")
+            
+            end_label = end_dt.strftime('%I:%M %p').lstrip('0') if end_dt else "End"
+            weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
         else:
-            weather_info = "Saturday forecast available on Thursday"
+            weather_info = "Saturday forecast available soon"
+
     except Exception as e:
         print(f"Weather Logic Error: {e}")
 
@@ -468,10 +474,15 @@ def attendance(code_str):
     status = request.form.get('status')
     strike_inc = 1 if status == 'Late' else 2 if status == 'No Show' else 0
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code_str}'")
-    if m_recs and strike_inc > 0:
-        new_strikes = m_recs[0]['fields'].get('Strikes', 0) + strike_inc
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": status, "Date": dt.datetime.now().strftime("%Y-%m-%d")}})
+    
+    player_level = ""
+    if m_recs:
+        player_level = m_recs[0]['fields'].get('Level', '')
+        if strike_inc > 0:
+            new_strikes = m_recs[0]['fields'].get('Strikes', 0) + strike_inc
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
+            
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": status, "Date": dt.datetime.now().strftime("%Y-%m-%d"), "Level": player_level}, "typecast": True})
     flash(f"Updated attendance for {code_str}", "info")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
@@ -494,21 +505,48 @@ def cron_monday():
     if play_mode == 'Split':
         mode_explanation = "This week we are in <b>Split</b> mode, with 3 courts reserved for each group. <br><i>(I may shift numbers on Friday to a 4 court/2 court arrangement if numbers support it.)</i>"
 
-    signups = get_airtable_data("Signups")
+    signups = get_airtable_data("Signups", sort_field="Created Time")
+    
+    # 1. Calculate the number of each rating that actually PLAYED (ignores waitlist)
+    played_levels = {}
+    if play_mode == 'Split':
+        lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
+        upper = [s for s in signups if s['fields'].get('Level') == '4.0/4.5']
+        l_cutoff = (min(len(lower), 12) // 4) * 4
+        u_cutoff = (min(len(upper), 12) // 4) * 4
+        playing_recs = lower[:l_cutoff] + upper[:u_cutoff]
+    else:
+        playing_cutoff = (min(len(signups), 24) // 4) * 4
+        playing_recs = signups[:playing_cutoff]
+
+    for r in playing_recs:
+        lvl = r['fields'].get('Level', 'Unrated')
+        played_levels[lvl] = played_levels.get(lvl, 0) + 1
+
+    # 2. Log stats and Email Admin
+    stats_msg = " | ".join([f"{k}: {v} players" for k, v in played_levels.items()])
+    if stats_msg:
+        log_activity("Weekly Play Stats", f"Played on {d_date} -> {stats_msg}")
+        send_email(ADMIN_EMAIL, f"📊 Weekly Stats for {d_date}", f"<p>Here is the breakdown of ratings that made the cutoff and played this past Saturday:</p><h3>{stats_msg}</h3>")
+
+    # 3. Archive everyone (with their Level) and clear signups
     for r in signups:
         try:
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up')}})
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up'), "Level": r['fields'].get('Level', '')}, "typecast": True})
+        except: pass
+        
+        try:
             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
         except: pass
             
+    # 4. Open signups for the new week
     try:
         emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
         send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p><b>Time:</b> {d_start}</p><p>{mode_explanation}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
     except: pass
         
     AIRTABLE_CACHE.clear()
-    return "Monday reset and emails sent successfully.", 200
-
+    return "Monday reset, stats calculated, and emails sent successfully.", 200
 
 @app.route('/cron/friday')
 def cron_friday():
@@ -545,7 +583,7 @@ def cron_friday():
                 send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(waitlist_recs)}</b> on the Open waitlist.</p><p>Keep an eye out for sub requests! {C} courts are currently reserved.</p>")
                 
         # 3. Email Big Picture Blast
-        send_email(all_emails, "🎾 Friday Update: Need more players!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+        send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
 
     else: 
         # SPLIT MODE LOGIC
