@@ -68,7 +68,8 @@ def send_email(to_emails, subject, html_content, is_multiple=False):
         server.quit()
     except Exception as e: print(f"Email Error: {e}")
 
-# === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION & RETRIES) ===
+
+# === SECTION 3: DATA CACHING ENGINE (WITH STRICT SPEED LIMIT) ===
 AIRTABLE_CACHE = {}
 CACHE_TTL = 30 
 
@@ -96,24 +97,17 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
             if offset:
                 params["offset"] = offset
                 
-            # --- NEW: Smart Retry Loop for 429 Errors ---
-            max_retries = 3
-            for attempt in range(max_retries):
-                res = requests.get(url, headers=HEADERS, params=params)
-                
-                if res.status_code == 429:
-                    # Airtable is overwhelmed. Wait 1s, then 2s, then 3s.
-                    print(f"⚠️ Rate limited on {table_name}. Retrying in {attempt + 1} second(s)...")
-                    time.sleep(attempt + 1) 
-                    continue
-                
-                res.raise_for_status()
-                break # Success! Break out of the retry loop
-            else:
-                # If we exhausted all 3 retries and still hit an error
-                res.raise_for_status()
-            # ---------------------------------------------
+            # STRICT SPEED LIMIT: Force a 0.25s pause BEFORE asking Airtable.
+            # This guarantees max 4 requests/sec, avoiding the 30-sec penalty box entirely.
+            time.sleep(0.25)
             
+            res = requests.get(url, headers=HEADERS, params=params)
+            
+            if res.status_code == 429:
+                print(f"⚠️ Penalty box hit on {table_name}. Caching empty to survive.")
+                break # If we somehow hit it, bail out gracefully so the app doesn't crash
+                
+            res.raise_for_status()
             data = res.json()
             records.extend(data.get('records', []))
             
@@ -121,9 +115,6 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
             if not offset:
                 break
                 
-            # Small pause between pages just to be safe
-            time.sleep(0.25)
-            
         AIRTABLE_CACHE[cache_key] = (current_time, records)
         return records
     except Exception as e: 
@@ -133,7 +124,12 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
 # === SECTION 4: PRIMARY ROUTES ===
 @app.route('/')
 def index():
+    # Instantly satisfy Render's health checks without hitting Airtable!
+    if request.method == 'HEAD':
+        return "OK", 200
+
     settings = get_airtable_data("Settings")
+    # ... (Keep the rest of your index function exactly the same)
     d_date, d_start, d_end = "TBD", "TBD", ""
     play_mode = "Open"
     start_dt = None
