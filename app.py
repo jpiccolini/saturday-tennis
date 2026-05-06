@@ -62,21 +62,22 @@ def send_email(to_emails, subject, html_content, is_multiple=False):
 
 # === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION) ===
 AIRTABLE_CACHE = {}
-CACHE_TTL = 30 
+CACHE_TTL = 60        # cache successful fetches for 60s (was 30s — halves steady-state load)
+ERROR_CACHE_TTL = 30  # on failure, hold the empty/stale result for 30s before retrying
 
 def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formula=None):
     current_time = time.time()
     cache_key = f"{table_name}_{sort_field}_{direction}_{filter_formula}"
-    
+
     if cache_key in AIRTABLE_CACHE:
         cached_time, cached_data = AIRTABLE_CACHE[cache_key]
         if current_time - cached_time < CACHE_TTL:
             return cached_data
-            
+
     records = []
     offset = None
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name}"
-    
+
     try:
         while True:
             params = {}
@@ -87,20 +88,31 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
                 params["filterByFormula"] = filter_formula
             if offset:
                 params["offset"] = offset
-                
-            res = requests.get(url, headers=HEADERS, params=params)
+
+            # Timeout prevents a slow/hung Airtable call from tying up the gunicorn worker
+            res = requests.get(url, headers=HEADERS, params=params, timeout=10)
             res.raise_for_status()
             data = res.json()
             records.extend(data.get('records', []))
-            
+
             offset = data.get('offset')
             if not offset:
                 break
-                
+
         AIRTABLE_CACHE[cache_key] = (current_time, records)
         return records
-    except Exception as e: 
+    except Exception as e:
         print(f"Airtable Fetch Error ({table_name}): {e}")
+        # CRITICAL: cache the failure too. Otherwise every page reload retries
+        # immediately, which during a 429 window keeps the rate-limit alive
+        # forever and the site never recovers on its own.
+        # If we have prior good data, keep serving it (stale-while-error). Otherwise
+        # cache an empty list briefly so we stop hammering the API.
+        if cache_key in AIRTABLE_CACHE:
+            _, stale_data = AIRTABLE_CACHE[cache_key]
+            AIRTABLE_CACHE[cache_key] = (current_time - (CACHE_TTL - ERROR_CACHE_TTL), stale_data)
+            return stale_data
+        AIRTABLE_CACHE[cache_key] = (current_time - (CACHE_TTL - ERROR_CACHE_TTL), [])
         return []
 
 # === SECTION 4: PRIMARY ROUTES ===
