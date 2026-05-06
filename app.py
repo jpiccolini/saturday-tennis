@@ -22,6 +22,11 @@ app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
 
 # === SECTION 1: SETUP & CONFIG ===
 API_KEY = os.environ.get("AIRTABLE_API_KEY")
+print("=== DEBUGGING INFO ===")
+print(f"Base ID: {os.environ.get('AIRTABLE_BASE_ID')}")
+print(f"Key Type: {type(API_KEY)}")
+print(f"Key Value: {repr(API_KEY)[:15]}... (Length: {len(str(API_KEY))})")
+print("======================")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
 ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY") # No longer strictly needed for Open-Meteo, kept for legacy
