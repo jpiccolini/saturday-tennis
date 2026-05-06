@@ -22,11 +22,14 @@ app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
 
 # === SECTION 1: SETUP & CONFIG ===
 API_KEY = os.environ.get("AIRTABLE_API_KEY")
+
+# Keeping the Debug Print - you can remove this later once it's fully live
 print("=== DEBUGGING INFO ===")
 print(f"Base ID: {os.environ.get('AIRTABLE_BASE_ID')}")
 print(f"Key Type: {type(API_KEY)}")
 print(f"Key Value: {repr(API_KEY)[:15]}... (Length: {len(str(API_KEY))})")
 print("======================")
+
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
 ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
 W_KEY = os.environ.get("WEATHER_API_KEY") # No longer strictly needed for Open-Meteo, kept for legacy
@@ -94,6 +97,11 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
                 params["offset"] = offset
                 
             res = requests.get(url, headers=HEADERS, params=params)
+            
+            # === THE SPEED BUMP ===
+            # Wait 0.25 seconds to respect Airtable's 5 requests/sec limit
+            time.sleep(0.25)
+            
             res.raise_for_status()
             data = res.json()
             records.extend(data.get('records', []))
@@ -613,25 +621,29 @@ def cron_friday():
         if len(u_wait) == 0 and len(upper) < 12:
             u_status = f"we have {len(upper)} players for 4.0/4.5. If {u_needed} more join, we will add a {get_ordinal(u_C + 1)} court."
         
-        big_picture = f"This week we are in Split mode. For the big picture: {l_status} And {u_status} <i>(We may shift to a 4 court / 2 court arrangement if the numbers support it!)</i>"
+        big_picture = f"This week we are in Split mode. For the big picture: <br>• {l_status}<br>• {u_status}<br><i>(We may shift to a 4 court / 2 court arrangement if the numbers support it!)</i>"
 
         # 1. Email Playing
         playing_emails = [r['fields'].get('Email') for r in (l_play + u_play) if r['fields'].get('Email')]
         if playing_emails:
             send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-            
-        # 2. Email Waitlists Individually
+
+        # 2. Email Waitlist Individually
         for idx, r in enumerate(l_wait):
             em = r['fields'].get('Email')
-            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(l_wait)}</b> on the 3.0/3.5 waitlist.</p><p>Keep an eye out for sub requests! {l_cutoff//4} courts are currently reserved for your level.</p>")
+            if em:
+                send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(l_wait)}</b> on the 3.0/3.5 waitlist.</p><p>Keep an eye out for sub requests! {l_C} courts are currently reserved.</p>")
+        
         for idx, r in enumerate(u_wait):
             em = r['fields'].get('Email')
-            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_cutoff//4} courts are currently reserved for your level.</p>")
+            if em:
+                send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_C} courts are currently reserved.</p>")
 
         # 3. Email Big Picture Blast
-        send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend:</p><p><b>{big_picture}</b></p><p>If you can play, jump in and help us fill out the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
-        
-    return "Friday reminder emails sent successfully.", 200
+        send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <br><br><b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+
+    AIRTABLE_CACHE.clear()
+    return "Friday emails sent successfully.", 200
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
