@@ -8,7 +8,7 @@
 # 6. ADMIN & GUEST ACTIONS
 # 7. CRON / AUTOMATION ROUTES
 # ==========================================
- 
+
 import os, requests, smtplib, uuid
 from flask import Flask, render_template, request, session, redirect, url_for, flash, jsonify
 import datetime as dt
@@ -16,10 +16,10 @@ from datetime import timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import time
- 
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
- 
+
 # === SECTION 1: SETUP & CONFIG ===
 API_KEY = os.environ.get("AIRTABLE_API_KEY")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
@@ -29,16 +29,16 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL")
 GMAIL_PW = os.environ.get("GMAIL_PASSWORD") 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", FROM_EMAIL) 
 SITE_URL = "https://saturday-tennis.onrender.com"
- 
+
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
- 
+
 # === SECTION 2: UTILITY FUNCTIONS ===
 def log_activity(name, action):
     try:
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
                       json={"fields": {"Name": name, "Action": action}})
     except: pass
- 
+
 def send_email(to_emails, subject, html_content, is_multiple=False):
     if not FROM_EMAIL or not GMAIL_PW or not to_emails: return
     if isinstance(to_emails, str): to_emails = [to_emails]
@@ -59,7 +59,7 @@ def send_email(to_emails, subject, html_content, is_multiple=False):
         server.sendmail(FROM_EMAIL, recipients, msg.as_string())
         server.quit()
     except Exception as e: print(f"Email Error: {e}")
- 
+
 def find_player_matches(first, last, master_list):
     """Return (exact_matches, near_matches) from Master List.
     Exact = both first and last match (case-insensitive).
@@ -74,7 +74,7 @@ def find_player_matches(first, last, master_list):
         elif fl and ll and (mf == fl or mlv == ll or mf.startswith(fl) or mlv.startswith(ll)):
             near.append(m)
     return exact, near
- 
+
 def next_player_code(master_list):
     """Return the next unused 4-digit player code as a string."""
     codes = []
@@ -84,7 +84,7 @@ def next_player_code(master_list):
         if c.isdigit() and 1000 < int(c) < 9000:
             codes.append(int(c))
     return str(max(codes, default=1000) + 1)
- 
+
 def build_court_map(n_courts, group_sizes, overrides, prefix=''):
     """
     Auto-assign logical courts (1..n) to physical courts 1-6.
@@ -96,14 +96,14 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
     """
     if n_courts == 0:
         return {}
- 
+
     end_courts   = [3, 6]
     mid_courts   = [1, 2, 4, 5]
     all_courts   = [1, 2, 3, 4, 5, 6]
- 
+
     assignment = {}
     used = set()
- 
+
     # Pass 1: partial groups get end courts (3, then 6)
     for i in range(n_courts):
         size = group_sizes[i] if i < len(group_sizes) else 4
@@ -113,7 +113,7 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
                     assignment[i + 1] = c
                     used.add(c)
                     break
- 
+
     # Pass 2: full groups fill middle courts first, then whatever's left
     for i in range(n_courts):
         if (i + 1) not in assignment:
@@ -122,7 +122,7 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
                     assignment[i + 1] = c
                     used.add(c)
                     break
- 
+
     # Apply admin overrides (stored as prefix+str(logical) → physical)
     for k, v in overrides.items():
         if prefix:
@@ -133,27 +133,27 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
             assignment[int(k)] = int(v)
         except:
             pass
- 
+
     return assignment
- 
+
 # === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION) ===
 AIRTABLE_CACHE = {}
 CACHE_TTL = 300       # cache successful fetches for 5 min — well within Airtable Team plan quota
 ERROR_CACHE_TTL = 30  # on failure, hold the empty/stale result for 30s before retrying
- 
+
 def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formula=None):
     current_time = time.time()
     cache_key = f"{table_name}_{sort_field}_{direction}_{filter_formula}"
- 
+
     if cache_key in AIRTABLE_CACHE:
         cached_time, cached_data = AIRTABLE_CACHE[cache_key]
         if current_time - cached_time < CACHE_TTL:
             return cached_data
- 
+
     records = []
     offset = None
     url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name}"
- 
+
     try:
         while True:
             params = {}
@@ -164,17 +164,17 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
                 params["filterByFormula"] = filter_formula
             if offset:
                 params["offset"] = offset
- 
+
             # Timeout prevents a slow/hung Airtable call from tying up the gunicorn worker
             res = requests.get(url, headers=HEADERS, params=params, timeout=10)
             res.raise_for_status()
             data = res.json()
             records.extend(data.get('records', []))
- 
+
             offset = data.get('offset')
             if not offset:
                 break
- 
+
         AIRTABLE_CACHE[cache_key] = (current_time, records)
         return records
     except Exception as e:
@@ -190,7 +190,7 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
             return stale_data
         AIRTABLE_CACHE[cache_key] = (current_time - (CACHE_TTL - ERROR_CACHE_TTL), [])
         return []
- 
+
 # === SORT KEY for manual roster ordering ===
 # Records with a "Manual Order" number sort first (ascending).
 # Records without it fall back to Airtable's createdTime (original behavior).
@@ -199,7 +199,7 @@ def sort_key(r):
     if manual is not None:
         return (0, float(manual), '')
     return (1, 0.0, r.get('createdTime', ''))
- 
+
 # === SECTION 4: PRIMARY ROUTES ===
 @app.route('/')
 def index():
@@ -215,7 +215,7 @@ def index():
             start_dt = dt.datetime.strptime(d_start, "%I:%M %p")
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
         except: d_end = ""
- 
+
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
     signup_recs = sorted(get_airtable_data("Signups"), key=sort_key)
@@ -225,23 +225,23 @@ def index():
         f = r['fields']; f['id'] = r['id']
         f['strikes'] = strike_map.get(str(f.get('Player Code')), 0)
         roster.append(f)
- 
+
     lower_roster, upper_roster = [], []
     lower_cutoff, upper_cutoff = 12, 12
     total_signups = len(roster)
     playing_cutoff = (min(total_signups, 24) // 4) * 4
     waitlist_count = total_signups - playing_cutoff
- 
+
     user_on_roster, waitlist_pos, pending_sub_offer = False, 0, False
     curr_user = session.get('user')
     my_team_id = None   # set below if user is on a team
- 
+
     if play_mode == 'Split':
         lower_roster = [p for p in roster if p.get('Level') == '3.0/3.5']
         upper_roster = [p for p in roster if p.get('Level') == '4.0/4.5']
         lower_cutoff = (min(len(lower_roster), 12) // 4) * 4
         upper_cutoff = (min(len(upper_roster), 12) // 4) * 4
- 
+
         if curr_user:
             for i, p in enumerate(lower_roster):
                 if str(p.get('Player Code')) == str(curr_user.get('code')):
@@ -264,9 +264,10 @@ def index():
                         waitlist_pos = i - playing_cutoff + 1
                 if play_mode == 'Open' and str(p.get('Sub Offer')) == str(curr_user.get('code')):
                     pending_sub_offer = True
- 
+
     # Build team_list for Team mode roster display
-    team_list = []
+    team_list    = []
+    pending_teams = []
     if play_mode == 'Team':
         teams_dict = {}
         for p in roster:
@@ -275,19 +276,33 @@ def index():
                 teams_dict[tid] = []
             teams_dict[tid].append(p)
         for tid, players in teams_dict.items():
-            captain = next((p for p in players if p.get('Is Captain')), players[0] if players else None)
-            others  = [p for p in players if p is not captain]
-            ordered = ([captain] if captain else []) + others
-            courts  = [ordered[i:i+4] for i in range(0, len(ordered), 4)]
-            team_list.append({'team_id': tid, 'captain': captain, 'courts': courts})
- 
+            captain  = next((p for p in players if p.get('Is Captain')), players[0] if players else None)
+            status   = (captain.get('Team Status') or 'Approved') if captain else 'Approved'
+            req_c    = int(captain.get('Requested Courts') or 1) if captain else 1
+            app_c    = int(captain.get('Approved Courts')  or req_c) if captain else req_c
+            reserves = [p for p in players if p.get('Is Reserve')]
+            courts_p = [p for p in players if not p.get('Is Reserve')]
+            cap_list = [captain] if captain else []
+            others   = [p for p in courts_p if p is not captain]
+            ordered  = cap_list + others
+            courts   = [ordered[i:i+4] for i in range(0, len(ordered), 4)]
+            team_data = {
+                'team_id': tid, 'captain': captain, 'courts': courts,
+                'reserves': reserves, 'status': status,
+                'requested_courts': req_c, 'approved_courts': app_c
+            }
+            if status == 'Pending':
+                pending_teams.append(team_data)
+            else:
+                team_list.append(team_data)
+
     weather_info = "Weather Unavailable"
     try:
         # Open-Meteo - 14-day forecast, Free, No API Key required
         lat, lon = "39.9936", "-105.0897" # Lafayette, CO Coordinates
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,weathercode&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=14"
         w_res = requests.get(weather_url).json()
- 
+
         # Calculate the upcoming Saturday based on today
         today = dt.date.today()
         days_ahead = 5 - today.weekday()
@@ -301,11 +316,11 @@ def index():
         
         start_time_str = f"{target_date_iso}T{s_hour:02d}:00"
         end_time_str = f"{target_date_iso}T{e_hour:02d}:00"
- 
+
         times = w_res.get('hourly', {}).get('time', [])
         temps = w_res.get('hourly', {}).get('temperature_2m', [])
         codes = w_res.get('hourly', {}).get('weathercode', [])
- 
+
         if start_time_str in times:
             s_idx = times.index(start_time_str)
             e_idx = times.index(end_time_str) if end_time_str in times else s_idx + 2
@@ -327,18 +342,18 @@ def index():
             weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
         else:
             weather_info = "Saturday forecast available soon"
- 
+
     except Exception as e:
         print(f"Weather Logic Error: {e}")
- 
+
     applicants, guest_requests = [], []
     if curr_user and curr_user.get('is_admin'):
         all_apps = get_airtable_data("Applicants")
         applicants = [a for a in all_apps if a['fields'].get('Status') == 'Pending' and not a['fields'].get('Sponsor')]
         guest_requests = [a for a in all_apps if a['fields'].get('Status') == 'Pending' and a['fields'].get('Sponsor')]
- 
+
     show_venmo = bool(settings[0]['fields'].get('Show Venmo')) if settings else False
- 
+
     # --- Physical court assignment ---
     import json
     raw_map = {}
@@ -347,13 +362,13 @@ def index():
             raw_map = json.loads(settings[0]['fields'].get('Court Map', '{}') or '{}')
         except:
             raw_map = {}
- 
+
     if play_mode == 'Open':
         # Open: up to 6 courts of 4. Overrides keyed "1".."6"
         n = playing_cutoff // 4
         court_map = build_court_map(n, [4] * n, raw_map)
         lower_court_map, upper_court_map = {}, {}
- 
+
     elif play_mode == 'Split':
         # Lower = physical courts 1-3 (end court = 3), overrides keyed "L1","L2","L3"
         # Upper = physical courts 4-6 (end court = 6), overrides keyed "U1","U2","U3"
@@ -364,7 +379,7 @@ def index():
         lower_court_map = {i: int(lower_raw.get(str(i), i))       for i in range(1, nl + 1)}
         upper_court_map = {i: int(upper_raw.get(str(i), i + 3))   for i in range(1, nu + 1)}
         court_map = {}
- 
+
     else:  # Team
         # Flatten all team-courts; auto-assign across courts 1-6; overrides keyed "T_1","T_2"…
         team_court_sizes = [len(c) for team in team_list for c in team['courts']]
@@ -380,7 +395,7 @@ def index():
         court_map       = team_court_map
         lower_court_map = {}
         upper_court_map = {}
- 
+
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster,
                            applicants=applicants, guest_requests=guest_requests, master_list=master_recs,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info,
@@ -388,8 +403,9 @@ def index():
                            pending_sub_offer=pending_sub_offer, play_mode=play_mode, lower_roster=lower_roster,
                            upper_roster=upper_roster, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff,
                            show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
-                           court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map)
- 
+                           court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
+                           pending_teams=pending_teams)
+
 @app.route('/validate', methods=['POST'])
 def validate():
     code = str(request.form.get('code', '')).strip()
@@ -425,22 +441,22 @@ def validate():
         send_email(ADMIN_EMAIL, "⚠️ Failed Login Attempt", f"<p>A user just attempted to log in with an invalid code: <b>{code}</b>.</p>")
         flash("Invalid Player Code.", "danger")
         return redirect(url_for('index'))
- 
+
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('index'))
- 
+
 # === SECTION 5: PLAYER ACTIONS ===
 @app.route('/signup', methods=['POST'])
 def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
- 
+
     if not user.get('contact_confirmed') or not user.get('level'):
         flash("Action Required: Please review your profile info to unlock signups.", "danger")
         return redirect(url_for('index'))
- 
+
     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{user['code']}'")
     if m_recs and m_recs[0]['fields'].get('Paused'):
         flash("🚫 Your account is paused due to strikes. Please contact Jim.", "danger")
@@ -450,7 +466,7 @@ def signup():
     if existing:
         flash("You are already signed up!", "warning")
         return redirect(url_for('index'))
- 
+
     payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email'], "Level": user['level']}}
     try:
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload).raise_for_status()
@@ -460,7 +476,7 @@ def signup():
     except:
         flash("Error saving signup to the database. Please try again or contact Jim.", "danger")
     return redirect(url_for('index'))
- 
+
 @app.route('/cancel', methods=['POST'])
 def cancel():
     if not session.get('user'): return redirect(url_for('index'))
@@ -480,7 +496,7 @@ def cancel():
             my_level = my_rec['fields'].get('Level')
             target_list = [r for r in recs if r['fields'].get('Level') == my_level]
             playing_cutoff = (min(len(target_list), 12) // 4) * 4
- 
+
         try: idx = target_list.index(my_rec)
         except: idx = -1
             
@@ -494,7 +510,7 @@ def cancel():
                     promo_code = promo['fields'].get('Player Code')
                     m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{promo_code}'")
                     promo_email = m_recs[0]['fields'].get('Email') if m_recs else None
- 
+
                     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS, json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
                     if promo_email:
                         send_email(promo_email, "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
@@ -506,18 +522,18 @@ def cancel():
                     flash("⚠️ NO ONE is on the waitlist for your level. You are marked NEEDS SUB.", "danger")
                 AIRTABLE_CACHE.clear()
                 return redirect(url_for('index'))
- 
+
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS)
         log_activity(session['user']['first'], "Cancelled")
     
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
- 
+
 @app.route('/accept_sub', methods=['POST'])
 def accept_sub():
     user = session.get('user')
     if not user or not user.get('contact_confirmed') or not user.get('level'): return redirect(url_for('index'))
- 
+
     recs = get_airtable_data("Signups")
     dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(user['code'])), None)
     me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
@@ -528,7 +544,7 @@ def accept_sub():
         AIRTABLE_CACHE.clear()
         flash("You successfully accepted the sub spot!", "success")
     return redirect(url_for('index'))
- 
+
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
     user = session.get('user')
@@ -539,7 +555,7 @@ def update_profile():
         flash("Both Email and Phone are required.", "danger"); return redirect(url_for('index'))
     if not user.get('level') and not new_level:
         flash("Play Level is required.", "danger"); return redirect(url_for('index'))
- 
+
     master = get_airtable_data("Master List")
     user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(user['code'])), None)
     if user_rec:
@@ -553,13 +569,13 @@ def update_profile():
         AIRTABLE_CACHE.clear()
         flash("Profile updated! Site unlocked.", "success")
     return redirect(url_for('index'))
- 
+
 @app.route('/apply', methods=['POST'])
 def apply():
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Status": "Pending"}})
     flash("Application submitted! We will email you your code once approved.", "success")
     return redirect(url_for('index'))
- 
+
 @app.route('/request_guest', methods=['POST'])
 def request_guest():
     user = session.get('user')
@@ -567,9 +583,9 @@ def request_guest():
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending", "Level": user.get('level', '')}})
     flash("Guest request submitted to Admin. They will be placed in your play level.", "info")
     return redirect(url_for('index'))
- 
+
 # === TEAM MODE ROUTES ===
- 
+
 @app.route('/team/lookup', methods=['POST'])
 def team_lookup():
     """AJAX endpoint: fuzzy-match a player name against Master List."""
@@ -596,56 +612,62 @@ def team_lookup():
             matches.append({'code': c, 'first': m['fields'].get('First'), 'last': m['fields'].get('Last')})
         return jsonify({'status': 'near', 'matches': matches})
     return jsonify({'status': 'none'})
- 
- 
+
+
 def _process_team_slots(user, form, court_count):
     """
     Shared logic for team create and update.
-    Returns (confirmed_players, new_players_created, error_messages).
-    confirmed_players: list of dicts with keys: code, first, last, email, level, court_num, is_captain
+    Player dict keys: code, first, last, email, level, court_num (0=reserve), is_captain, is_reserve
     """
-    master_list = get_airtable_data("Master List")
-    confirmed = []
+    master_list  = get_airtable_data("Master List")
+    confirmed    = []
     new_accounts = []
-    errors = []
- 
-    # Captain is always slot 0, court 1
+    errors       = []
+
+    # Captain: court 1, never a reserve
     confirmed.append({
         'code': user['code'], 'first': user['first'], 'last': user['last'],
         'email': user.get('email', ''), 'level': user.get('level', ''),
-        'court_num': 1, 'is_captain': True
+        'court_num': 1, 'is_captain': True, 'is_reserve': False
     })
- 
-    total_slots = court_count * 4 - 1   # minus captain
-    for i in range(total_slots):
-        first      = form.get(f'first_{i}', '').strip()
-        last       = form.get(f'last_{i}', '').strip()
-        code       = form.get(f'player_code_{i}', '').strip()
-        email      = form.get(f'email_{i}', '').strip()
-        phone      = form.get(f'phone_{i}', '').strip()
- 
+
+    i = 0
+    while True:
+        first = form.get(f'first_{i}', None)
+        if first is None and form.get(f'last_{i}') is None:
+            break
+        first  = (first or '').strip()
+        last   = form.get(f'last_{i}',        '').strip()
+        code   = form.get(f'player_code_{i}', '').strip()
+        email  = form.get(f'email_{i}',       '').strip()
+        phone  = form.get(f'phone_{i}',       '').strip()
+        is_res = form.get(f'is_reserve_{i}',  '0') == '1'
+        i += 1
+
         if not first and not last:
-            continue   # empty slot — skip
- 
-        court_num = ((len(confirmed)) // 4) + 1
- 
+            continue
+
+        if is_res:
+            court_num = 0
+        else:
+            court_players = sum(1 for p in confirmed if not p['is_reserve'])
+            court_num = ((court_players) // 4) + 1
+
         if code and code != 'new':
-            # Confirmed existing player
             m = next((m for m in master_list
                       if str(m['fields'].get('Code', '')).replace('.0', '').strip() == code), None)
             if m:
                 confirmed.append({
                     'code': code,
                     'first': m['fields'].get('First', first),
-                    'last': m['fields'].get('Last', last),
+                    'last':  m['fields'].get('Last',  last),
                     'email': m['fields'].get('Email', ''),
                     'level': m['fields'].get('Level', ''),
-                    'court_num': court_num, 'is_captain': False
+                    'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
                 })
         elif first and last and email:
-            # New player — create Master List entry
-            master_list = get_airtable_data("Master List")   # refresh for latest code
-            new_code = next_player_code(master_list)
+            master_list = get_airtable_data("Master List")
+            new_code    = next_player_code(master_list)
             try:
                 requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List",
                     headers=HEADERS,
@@ -653,15 +675,13 @@ def _process_team_slots(user, form, court_count):
                                      "Phone": phone, "Code": new_code,
                                      "Level": user.get('level', '')},
                           "typecast": True}, timeout=10)
-                # Invalidate Master List cache so next_player_code is fresh
                 keys = [k for k in AIRTABLE_CACHE if k.startswith('Master')]
                 for k in keys: del AIRTABLE_CACHE[k]
- 
                 new_accounts.append({'first': first, 'last': last, 'email': email, 'code': new_code})
                 confirmed.append({
                     'code': new_code, 'first': first, 'last': last,
                     'email': email, 'level': user.get('level', ''),
-                    'court_num': court_num, 'is_captain': False
+                    'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
                 })
                 send_email(email, "🎾 Welcome to Saturday Tennis Gang!",
                     f"<p>Hi {first}! <b>{user['first']} {user['last']}</b> has added you to "
@@ -674,13 +694,13 @@ def _process_team_slots(user, form, court_count):
                 errors.append(f"Could not create account for {first} {last}: {e}")
         elif first or last:
             errors.append(f"Skipped '{first} {last}' — no match confirmed and no email provided.")
- 
+
     return confirmed, new_accounts, errors
- 
- 
-def _send_captain_summary(user, confirmed, new_accounts, d_date):
+
+
+def _send_captain_summary(user, confirmed, new_accounts, d_date, pending=False):
     courts_html = ""
-    court_nums = sorted(set(p['court_num'] for p in confirmed))
+    court_nums = sorted(set(p['court_num'] for p in confirmed if p['court_num'] > 0))
     for cn in court_nums:
         cp = [p for p in confirmed if p['court_num'] == cn]
         courts_html += f"<h4>Court {cn}</h4><ul>"
@@ -688,7 +708,15 @@ def _send_captain_summary(user, confirmed, new_accounts, d_date):
             tag = " <em>(Captain)</em>" if p.get('is_captain') else ""
             courts_html += f"<li>{p['first']} {p['last']}{tag}</li>"
         courts_html += "</ul>"
- 
+
+    reserves = [p for p in confirmed if p.get('is_reserve')]
+    res_html = ""
+    if reserves:
+        res_html = "<h4>📋 Reserves</h4><ul>"
+        for p in reserves:
+            res_html += f"<li>{p['first']} {p['last']}</li>"
+        res_html += "</ul>"
+
     new_html = ""
     if new_accounts:
         new_html = "<h4>New accounts created:</h4><ul>"
@@ -696,82 +724,95 @@ def _send_captain_summary(user, confirmed, new_accounts, d_date):
             new_html += (f"<li><b>{np['first']} {np['last']}</b> — "
                          f"Code: <b>{np['code']}</b> | Email: {np['email']}</li>")
         new_html += "</ul><p><em>Each new player has been emailed their code and site link.</em></p>"
- 
-    send_email(user['email'], f"🎾 Team Summary for {d_date}",
+
+    status_note = ("<p><b>⏳ Your request is pending Jim's review.</b> "
+                   "Your team will appear on the roster once approved. "
+                   f"You can edit your request at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>"
+                   if pending else
+                   f"<p>Your team is live. Edit it at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>")
+
+    send_email(user['email'], f"🎾 Team {'Request' if pending else 'Summary'} for {d_date}",
         f"<p>Hi {user['first']}! Here is your team lineup:</p>"
-        f"{courts_html}{new_html}"
-        f"<p>To edit your team, log in at <a href='{SITE_URL}'>{SITE_URL}</a> "
-        f"and use the <b>Edit My Team</b> button on the roster.</p>")
- 
- 
+        f"{courts_html}{res_html}{new_html}{status_note}")
+
+
 @app.route('/team/create', methods=['POST'])
 def team_create():
     user = session.get('user')
     if not user or not user.get('contact_confirmed') or not user.get('level'):
         flash("Please complete your profile first.", "danger")
         return redirect(url_for('index'))
- 
+
     existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
     if existing:
         flash("You are already on the roster.", "warning")
         return redirect(url_for('index'))
- 
+
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'Saturday') if settings else 'Saturday'
- 
+
     court_count = max(1, min(2, int(request.form.get('court_count', 1))))
     confirmed, new_accounts, errors = _process_team_slots(user, request.form, court_count)
- 
+
     team_id = str(uuid.uuid4())[:8].upper()
     for p in confirmed:
         try:
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS,
-                json={"fields": {
-                    "First": p['first'], "Last": p['last'],
-                    "Player Code": str(p['code']), "Email": p['email'],
-                    "Level": p['level'], "Team ID": team_id,
-                    "Is Captain": p.get('is_captain', False),
-                    "Court Num": p['court_num']
-                }}, timeout=10)
+            fields = {
+                "First": p['first'], "Last": p['last'],
+                "Player Code": str(p['code']), "Email": p['email'],
+                "Level": p['level'], "Team ID": team_id,
+                "Is Captain": p.get('is_captain', False),
+                "Is Reserve": p.get('is_reserve', False),
+                "Court Num":  p['court_num']
+            }
+            if p.get('is_captain'):
+                fields["Team Status"]     = "Pending"
+                fields["Requested Courts"] = court_count
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
+                headers=HEADERS, json={"fields": fields}, timeout=10)
         except Exception as e:
             errors.append(f"Error adding {p['first']} to roster: {e}")
- 
-    _send_captain_summary(user, confirmed, new_accounts, d_date)
- 
+
+    _send_captain_summary(user, confirmed, new_accounts, d_date, pending=True)
+
     AIRTABLE_CACHE.clear()
-    log_activity(user['first'], f"Created Team {team_id}")
- 
+    log_activity(user['first'], f"Created Team {team_id} (pending review)")
+
     for e in errors: flash(e, "warning")
-    flash(f"Team created — {len(confirmed)} players on {court_count} court(s). Summary emailed to you.", "success")
+    n_courts  = sum(1 for p in confirmed if not p['is_reserve'] and p['court_num'] > 0)
+    n_res     = sum(1 for p in confirmed if p['is_reserve'])
+    res_note  = f" + {n_res} reserve(s)" if n_res else ""
+    flash(f"Team request submitted — {len(confirmed)} players across {court_count} court(s){res_note}. "
+          f"Jim will review and approve before it appears on the roster.", "success")
     return redirect(url_for('index'))
- 
- 
+
+
 @app.route('/team/update/<team_id>', methods=['POST'])
 def team_update(team_id):
     """Captain replaces their team's non-captain players with a new submission."""
     user = session.get('user')
     if not user: return redirect(url_for('index'))
- 
+
     recs = get_airtable_data("Signups")
     my_rec = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
- 
+
     if not my_rec or my_rec['fields'].get('Team ID') != team_id:
         if not session['user'].get('is_admin'):
             flash("Only the team captain can edit this team.", "danger")
             return redirect(url_for('index'))
- 
+
     # Delete all non-captain members of this team
     for r in recs:
         if r['fields'].get('Team ID') == team_id and r['id'] != (my_rec['id'] if my_rec else ''):
             try: requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS, timeout=10)
             except: pass
- 
+
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'Saturday') if settings else 'Saturday'
- 
+
     court_count = max(1, min(2, int(request.form.get('court_count', 1))))
     confirmed, new_accounts, errors = _process_team_slots(user, request.form, court_count)
- 
+
     for p in confirmed:
         if p.get('is_captain'): continue   # captain record already exists
         try:
@@ -784,47 +825,102 @@ def team_update(team_id):
                 }}, timeout=10)
         except Exception as e:
             errors.append(f"Error adding {p['first']}: {e}")
- 
+
     _send_captain_summary(user, confirmed, new_accounts, d_date)
- 
+
     AIRTABLE_CACHE.clear()
     log_activity(user['first'], f"Updated Team {team_id}")
     for e in errors: flash(e, "warning")
     flash("Team updated! Summary emailed to you.", "success")
     return redirect(url_for('index'))
- 
- 
+
+
 @app.route('/team/remove_player/<signup_id>', methods=['POST'])
 def team_remove_player(signup_id):
     user = session.get('user')
     if not user: return redirect(url_for('index'))
- 
+
     recs = get_airtable_data("Signups")
     my_rec     = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
     target_rec = next((r for r in recs if r['id'] == signup_id), None)
- 
+
     if not target_rec:
         flash("Player record not found.", "danger")
         return redirect(url_for('index'))
- 
+
     is_admin   = session['user'].get('is_admin')
     is_captain = my_rec and my_rec['fields'].get('Is Captain')
     same_team  = my_rec and my_rec['fields'].get('Team ID') == target_rec['fields'].get('Team ID')
- 
+
     if not is_admin and not (is_captain and same_team):
         flash("Only the team captain can remove players.", "danger")
         return redirect(url_for('index'))
- 
+
     if my_rec and signup_id == my_rec['id']:
         flash("To leave the roster yourself, use Cancel Spot.", "warning")
         return redirect(url_for('index'))
- 
+
     requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{signup_id}", headers=HEADERS)
     keys = [k for k in AIRTABLE_CACHE if k.startswith('Signups')]
     for k in keys: del AIRTABLE_CACHE[k]
     flash("Player removed from team.", "info")
     return redirect(url_for('index'))
- 
+
+@app.route('/team/approve/<team_id>', methods=['POST'])
+def team_approve(team_id):
+    """Admin approves a pending team, optionally with fewer courts than requested."""
+    user = session.get('user')
+    if not user or not user.get('is_admin'):
+        return "Unauthorized", 403
+
+    approved_courts = max(1, int(request.form.get('approved_courts', 1)))
+    recs = get_airtable_data("Signups")
+    team_recs = [r for r in recs if r['fields'].get('Team ID') == team_id]
+    captain_rec = next((r for r in team_recs if r['fields'].get('Is Captain')), None)
+
+    if not captain_rec:
+        flash("Team not found.", "danger")
+        return redirect(url_for('index'))
+
+    requested_courts = int(captain_rec['fields'].get('Requested Courts') or 1)
+    cap_fields = captain_rec['fields']
+
+    # Approve the captain record
+    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{captain_rec['id']}",
+        headers=HEADERS, json={"fields": {
+            "Team Status":     "Approved",
+            "Approved Courts": approved_courts
+        }}, timeout=10)
+
+    # If fewer courts approved, demote excess court players to reserves
+    if approved_courts < requested_courts:
+        capacity = approved_courts * 4 - 1  # minus captain
+        non_cap = sorted(
+            [r for r in team_recs if not r['fields'].get('Is Captain') and not r['fields'].get('Is Reserve')],
+            key=lambda r: (r['fields'].get('Court Num', 1), r.get('createdTime', ''))
+        )
+        for idx, r in enumerate(non_cap):
+            if idx >= capacity:
+                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}",
+                    headers=HEADERS, json={"fields": {"Is Reserve": True, "Court Num": 0}}, timeout=10)
+
+    # Email captain
+    note = ""
+    if approved_courts < requested_courts:
+        note = (f" You requested {requested_courts} court(s), but only {approved_courts} "
+                f"could be accommodated this week. Extra players have been moved to reserves.")
+    send_email(cap_fields.get('Email', ''), "🎾 Your Team Has Been Approved!",
+        f"<p>Hi {cap_fields.get('First', '')}! Your team request for "
+        f"<b>{approved_courts} court(s)</b> has been approved.{note}</p>"
+        f"<p>Your team is now visible on the roster at "
+        f"<a href='{SITE_URL}'>{SITE_URL}</a>.</p>")
+
+    AIRTABLE_CACHE.clear()
+    log_activity("Admin", f"Approved Team {team_id} for {approved_courts} court(s)")
+    flash(f"Team '{cap_fields.get('First','')} {cap_fields.get('Last','')}' approved "
+          f"for {approved_courts} court(s).", "success")
+    return redirect(url_for('index'))
+
 # === SECTION 6: ADMIN ACTIONS ===
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
@@ -840,6 +936,13 @@ def admin_action():
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
             json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})   # reset court map on mode change
         flash(f"Mode switched to {new_mode}! Court assignments reset.", "success")
+    elif action == "toggle_mode_direct" and settings:
+        new_mode = request.form.get('new_mode', 'Open')
+        if new_mode not in ('Open', 'Split', 'Team'):
+            new_mode = 'Open'
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
+            json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})
+        flash(f"Switched to {new_mode} Mode.", "success")
     elif action == "assign_court" and settings:
         import json
         logical  = request.form.get('logical', '').strip()
@@ -865,7 +968,7 @@ def admin_action():
         return cron_monday()
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
- 
+
 @app.route('/move_player/<signup_id>', methods=['POST'])
 def move_player(signup_id):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -874,7 +977,7 @@ def move_player(signup_id):
     AIRTABLE_CACHE.clear()
     flash("Player moved successfully to balance courts!", "success")
     return redirect(url_for('index'))
- 
+
 @app.route('/info_blast', methods=['POST'])
 def info_blast():
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -883,7 +986,7 @@ def info_blast():
     send_email(emails, "🎾 Tennis Gang Announcement", f"<p>{msg}</p>", is_multiple=True)
     flash("Announcement sent!", "success")
     return redirect(url_for('index'))
- 
+
 @app.route('/approve_player/<id>', methods=['POST'])
 def approve_player(id):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -898,7 +1001,7 @@ def approve_player(id):
     flash(f"Approved with Code {new_code}.", "success")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
- 
+
 @app.route('/approve_guest/<app_id>', methods=['POST'])
 def approve_guest(app_id):
     if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
@@ -909,7 +1012,7 @@ def approve_guest(app_id):
     flash(f"Guest added to roster!", "success")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
- 
+
 @app.route('/attendance/<code_str>', methods=['POST'])
 def attendance(code_str):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -928,36 +1031,36 @@ def attendance(code_str):
     flash(f"Updated attendance for {code_str}", "info")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
- 
+
 @app.route('/reorder', methods=['POST'])
 def reorder():
     """Admin-only: move a signup record up or down in the manual roster order."""
     if not session.get('user') or not session['user'].get('is_admin'):
         return "Unauthorized", 403
- 
+
     record_id = request.form.get('record_id')
     direction = request.form.get('direction')  # 'up' or 'down'
- 
+
     # Use the same sort used by index() so positions match what admin sees
     signups = sorted(get_airtable_data("Signups"), key=sort_key)
     ids = [r['id'] for r in signups]
- 
+
     if record_id not in ids:
         flash("Record not found — try refreshing.", "danger")
         return redirect(url_for('index'))
- 
+
     idx = ids.index(record_id)
     if direction == 'up' and idx == 0:
         return redirect(url_for('index'))   # already at top
     if direction == 'down' and idx == len(ids) - 1:
         return redirect(url_for('index'))   # already at bottom
- 
+
     swap_idx = idx - 1 if direction == 'up' else idx + 1
- 
+
     # Assign 1-based Manual Order values to the two swapped records
     new_order_this = swap_idx + 1
     new_order_swap = idx + 1
- 
+
     base_url = f"https://api.airtable.com/v0/{BASE_ID}/Signups"
     try:
         requests.patch(f"{base_url}/{signups[idx]['id']}", headers=HEADERS,
@@ -967,21 +1070,21 @@ def reorder():
     except Exception as e:
         flash(f"Reorder failed: {e}", "danger")
         return redirect(url_for('index'))
- 
+
     # Bust Signups cache so the next page load shows the updated order
     keys_to_clear = [k for k in AIRTABLE_CACHE if k.startswith('Signups')]
     for k in keys_to_clear:
         del AIRTABLE_CACHE[k]
- 
+
     return redirect(url_for('index'))
- 
+
 # === SECTION 7: CRON / AUTOMATION ===
- 
+
 # Helper for friendly numbers (1st, 2nd, 3rd)
 def get_ordinal(n):
     if 11 <= (n % 100) <= 13: return str(n) + 'th'
     return str(n) + {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
- 
+
 @app.route('/cron/monday')
 def cron_monday():
     settings = get_airtable_data("Settings")
@@ -989,10 +1092,26 @@ def cron_monday():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
     
-    mode_explanation = "This week we are in <b>Open</b> mode, all members in one list."
-    if play_mode == 'Split':
-        mode_explanation = "This week we are in <b>Split</b> mode, with 3 courts reserved for each group. <br><i>(I may shift numbers on Friday to a 4 court/2 court arrangement if numbers support it.)</i>"
- 
+    mode_descriptions = {
+        'Open':  "This week we are in <b>Open</b> mode — sign up individually, first come first served across all available courts.",
+        'Split': "This week we are in <b>Split</b> mode, with 3 courts reserved for each skill group. "
+                 "<br><i>(I may shift numbers on Friday to a 4/2 arrangement if sign-ups support it.)</i>",
+        'Team':  "This week we are in <b>Team</b> mode — captains sign up a full court (4 players) and can list reserves. "
+                 "Log in, click <b>Start a Team</b>, and submit your court request. "
+                 "I'll review and approve court assignments before the roster goes live.",
+    }
+    mode_explanation = mode_descriptions.get(play_mode, mode_descriptions['Open'])
+
+    # Week Note: if set in Settings, prepend it (for special introductions like Team Mode launch)
+    week_note = settings[0]['fields'].get('Week Note', '').strip() if settings else ''
+    if week_note:
+        mode_explanation = f"{week_note}<br><br>{mode_explanation}"
+        # Clear the note so it doesn't repeat next week
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                headers=HEADERS, json={"fields": {"Week Note": ""}})
+        except: pass
+
     signups = get_airtable_data("Signups", sort_field="Created Time")
     
     # 1. Calculate the number of each rating that actually PLAYED (ignores waitlist)
@@ -1006,17 +1125,17 @@ def cron_monday():
     else:
         playing_cutoff = (min(len(signups), 24) // 4) * 4
         playing_recs = signups[:playing_cutoff]
- 
+
     for r in playing_recs:
         lvl = r['fields'].get('Level', 'Unrated')
         played_levels[lvl] = played_levels.get(lvl, 0) + 1
- 
+
     # 2. Log stats and Email Admin
     stats_msg = " | ".join([f"{k}: {v} players" for k, v in played_levels.items()])
     if stats_msg:
         log_activity("Weekly Play Stats", f"Played on {d_date} -> {stats_msg}")
         send_email(ADMIN_EMAIL, f"📊 Weekly Stats for {d_date}", f"<p>Here is the breakdown of ratings that made the cutoff and played this past Saturday:</p><h3>{stats_msg}</h3>")
- 
+
     # 3. Archive everyone (with their Level) and clear signups
     for r in signups:
         try:
@@ -1035,7 +1154,7 @@ def cron_monday():
         
     AIRTABLE_CACHE.clear()
     return "Monday reset, stats calculated, and emails sent successfully.", 200
- 
+
 @app.route('/cron/friday')
 def cron_friday():
     settings = get_airtable_data("Settings")
@@ -1072,7 +1191,7 @@ def cron_friday():
                 
         # 3. Email Big Picture Blast
         send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
- 
+
     else: 
         # SPLIT MODE LOGIC
         lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
@@ -1097,7 +1216,7 @@ def cron_friday():
             u_status = f"we have {len(upper)} players for 4.0/4.5. If {u_needed} more join, we will add a {get_ordinal(u_C + 1)} court."
         
         big_picture = f"This week we are in Split mode. For the big picture: {l_status} And {u_status} <i>(We may shift to a 4 court / 2 court arrangement if the numbers support it!)</i>"
- 
+
         # 1. Email Playing
         playing_emails = [r['fields'].get('Email') for r in (l_play + u_play) if r['fields'].get('Email')]
         if playing_emails:
@@ -1110,11 +1229,11 @@ def cron_friday():
         for idx, r in enumerate(u_wait):
             em = r['fields'].get('Email')
             if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_cutoff//4} courts are currently reserved for your level.</p>")
- 
+
         # 3. Email Big Picture Blast
         send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend:</p><p><b>{big_picture}</b></p><p>If you can play, jump in and help us fill out the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
         
     return "Friday reminder emails sent successfully.", 200
- 
+
 if __name__ == '__main__':
     app.run(debug=True)
