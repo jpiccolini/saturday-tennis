@@ -301,6 +301,9 @@ def index():
             others   = [p for p in courts_p if p is not captain]
             ordered  = cap_list + others
             courts   = [ordered[i:i+4] for i in range(0, len(ordered), 4)]
+            # Pad to approved_courts so courts with missing players still show as TBD
+            while len(courts) < app_c:
+                courts.append([])
             team_data = {
                 'team_id': tid, 'captain': captain, 'courts': courts,
                 'reserves': reserves, 'status': status,
@@ -714,7 +717,20 @@ def _process_team_slots(user, form, court_count):
             elif email:
                 code = 'new'   # fall through to new-player creation below
             elif near:
-                errors.append(f"Multiple possible matches for '{first} {last}' — please use the modal lookup to confirm which player.")
+                # Pick best near match: prefer both names partially matching over just one
+                def near_score(m):
+                    mf = m['fields'].get('First','').lower()
+                    ml = m['fields'].get('Last','').lower()
+                    return (mf == first.lower()) + (ml == last.lower())
+                best = max(near, key=near_score)
+                mc = str(best['fields'].get('Code','')).replace('.0','').strip()
+                confirmed.append({
+                    'code': mc, 'first': best['fields'].get('First', first),
+                    'last': best['fields'].get('Last', last),
+                    'email': best['fields'].get('Email', ''),
+                    'level': best['fields'].get('Level', ''),
+                    'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
+                })
                 continue
             else:
                 errors.append(f"'{first} {last}' not found — provide their email to create an account.")
