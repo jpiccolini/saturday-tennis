@@ -922,12 +922,12 @@
 
             // Collect court slots then reserve slots
             const allContainers = [
-                {id: 'slots-court1', isRes: false},
-                {id: 'slots-court2', isRes: false},
-                {id: 'slots-reserve', isRes: true}
+                {id: 'slots-court1', isRes: false, courtNum: 1},
+                {id: 'slots-court2', isRes: false, courtNum: 2},
+                {id: 'slots-reserve', isRes: true,  courtNum: 0}
             ];
 
-            allContainers.forEach(({id, isRes}) => {
+            allContainers.forEach(({id, isRes, courtNum}) => {
                 const container = document.getElementById(id);
                 if (!container) return;
                 container.querySelectorAll('[id^="slot-"]').forEach(slotDiv => {
@@ -953,6 +953,7 @@
                     hiddenForm.appendChild(_input(`email_${slotIdx}`,        email));
                     hiddenForm.appendChild(_input(`phone_${slotIdx}`,        phone));
                     hiddenForm.appendChild(_input(`is_reserve_${slotIdx}`,   res === '1' || isRes ? '1' : '0'));
+                    hiddenForm.appendChild(_input(`court_num_${slotIdx}`,    isRes ? '0' : String(courtNum)));
                     slotIdx++;
                 });
             });
