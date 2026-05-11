@@ -178,8 +178,8 @@
                                     <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
                                     {% if play_mode == 'Team' and my_team_id %}
                                         {% for team in team_list %}{% if team.team_id == my_team_id %}{% if team.captain and team.captain.get('Player Code')|string == session.user.get('code')|string %}
-                                        <button class="btn btn-warning w-100 fw-bold mb-2"
-                                                onclick="openTeamModal('{{ team.team_id }}', {{ team.courts | tojson }}, {{ team.reserves | tojson }})">
+                                        <button class="btn btn-warning w-100 fw-bold mb-2 edit-team-btn"
+                                                data-team-id="{{ team.team_id }}">
                                             ✏️ Edit My Team
                                         </button>
                                         {% endif %}{% endif %}{% endfor %}
@@ -395,15 +395,15 @@
                                                 🏆 {{ captain.get('First','?') }} {{ captain.get('Last','') }}'s Team
                                                 <span class="badge bg-secondary ms-1">{{ team.courts | length }} court(s)</span>
                                             </h6>
-                                            {% if session.get('user') %}
-                                                {% set am_captain = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
-                                                {% if am_captain %}
-                                                <button class="btn btn-sm btn-outline-warning"
-                                                        onclick="openTeamModal('{{ team.team_id }}', {{ team.courts | tojson }}, {{ team.reserves | tojson }})">
-                                                    ✏️ Edit
-                                                </button>
-                                                {% endif %}
+                                        {% if session.get('user') %}
+                                            {% set am_captain = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
+                                            {% if am_captain %}
+                                            <button class="btn btn-sm btn-outline-warning edit-team-btn"
+                                                    data-team-id="{{ team.team_id }}">
+                                                ✏️ Edit
+                                            </button>
                                             {% endif %}
+                                        {% endif %}
                                         </div>
                                         {# Courts #}
                                         {% set ns = namespace(team_court_seq=0) %}
@@ -651,7 +651,27 @@
     </div>
     {% endif %}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% if play_mode == 'Team' and session.get('user') %}
+    <script>
+    // Team data stored safely in a script block (not inline onclick)
+    var TENNIS_TEAMS = {};
+    {% for team in team_list %}
+    TENNIS_TEAMS[{{ team.team_id | tojson }}] = {
+        courts:   {{ team.courts   | tojson }},
+        reserves: {{ team.reserves | tojson }}
+    };
+    {% endfor %}
+
+    // Single event listener handles all Edit / Edit My Team buttons
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.edit-team-btn');
+        if (!btn) return;
+        const teamId = btn.dataset.teamId;
+        const data   = TENNIS_TEAMS[teamId] || {courts: [], reserves: []};
+        openTeamModal(teamId, data.courts, data.reserves);
+    });
+    </script>
+    {% endif %}
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
