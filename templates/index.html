@@ -600,8 +600,9 @@
                 </div>
                 <div class="modal-body">
                     <p class="text-muted small mb-3">
-                        You are the captain of Court 1. Add teammates by name — the system will look them up.
-                        If a player isn't in the system, provide their email and we'll create their account.
+                        You are the captain of Court 1. Type a teammate's name in any empty slot,
+                        then <b>tab off the Last name field</b> to look them up.
+                        Green ✓ means confirmed. Empty slots are ignored when you save.
                     </p>
 
                     <!-- Court 1 -->
@@ -611,6 +612,7 @@
                             <span class="fw-bold me-2">{{ session.user.get('first') }} {{ session.user.get('last') }}</span>
                             <span class="badge bg-warning text-dark">You (Captain)</span>
                         </div>
+                        <p class="small text-muted mb-1">Add up to 3 teammates. Type a name and tab off to look them up.</p>
                         <div id="slots-court1"></div>
                         <button type="button" class="btn btn-sm btn-outline-success mt-1"
                                 onclick="addSlot(1)" id="addBtn1">+ Add Teammate to Court 1</button>
@@ -619,6 +621,7 @@
                     <!-- Court 2 (hidden by default) -->
                     <div id="court2section" style="display:none" class="mb-4">
                         <h6 class="fw-bold text-danger border-bottom pb-1">🎾 Court 2</h6>
+                        <p class="small text-muted mb-1">Add up to 4 players for Court 2. Type a name and tab off to look them up.</p>
                         <div id="slots-court2"></div>
                         <button type="button" class="btn btn-sm btn-outline-danger mt-1"
                                 onclick="addSlot(2)" id="addBtn2">+ Add Player to Court 2</button>
@@ -653,22 +656,14 @@
 
     {% if play_mode == 'Team' and session.get('user') %}
     <script>
-    // Team data stored safely in a script block (not inline onclick)
-    var TENNIS_TEAMS = {};
-    {% for team in team_list %}
-    TENNIS_TEAMS[{{ team.team_id | tojson }}] = {
-        courts:   {{ team.courts   | tojson }},
-        reserves: {{ team.reserves | tojson }}
-    };
-    {% endfor %}
-
-    // Single event listener handles all Edit / Edit My Team buttons
     document.addEventListener('click', function(e) {
         const btn = e.target.closest('.edit-team-btn');
         if (!btn) return;
         const teamId = btn.dataset.teamId;
-        const data   = TENNIS_TEAMS[teamId] || {courts: [], reserves: []};
-        openTeamModal(teamId, data.courts, data.reserves);
+        fetch('/team/data/' + teamId)
+            .then(r => r.json())
+            .then(data => openTeamModal(teamId, data.courts || [], data.reserves || []))
+            .catch(() => alert('Could not load team data — please try refreshing the page.'));
     });
     </script>
     {% endif %}
@@ -720,6 +715,15 @@
                         addSlot(courtNum, player);
                     });
                 });
+                // When editing, show all remaining empty slots so it's obvious where to add players
+                if (teamId) {
+                    const max1 = 3;  // court 1: captain + 3 others
+                    const max2 = 4;  // court 2: 4 players
+                    while (teamSlotCounts[1] < max1) addSlot(1);
+                    if (document.getElementById('court2section').style.display !== 'none') {
+                        while (teamSlotCounts[2] < max2) addSlot(2);
+                    }
+                }
             }
             if (reserves && reserves.length) {
                 reserves.forEach(player => addReserveSlot(player));
