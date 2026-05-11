@@ -1,1493 +1,971 @@
-# ==========================================
-# TABLE OF CONTENTS - app.py
-# 1. SETUP & CONFIG (Env Vars, Headers)
-# 2. UTILITY FUNCTIONS (Email, Logging)
-# 3. DATA CACHING ENGINE (With Pagination)
-# 4. PRIMARY ROUTES (Index, Login/Logout)
-# 5. PLAYER ACTIONS (Signup, Cancel, Subs, Profile)
-# 6. ADMIN & GUEST ACTIONS
-# 7. CRON / AUTOMATION ROUTES
-# ==========================================
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- template-version: 2026-05-11-maintenance -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saturday Tennis @ Dawson School</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .roster-card { transition: 0.2s; border-left: 5px solid #198754; }
+        .waitlist-card { border-left: 5px solid #ffc107; border-right: 5px solid #ffc107; }
+        .admin-sidebar-box { border: 1px solid #dc3545; background-color: #fffafa; border-radius: 8px; }
+        .clickable-header { cursor: pointer; }
+        .clickable-header:hover { opacity: 0.9; }
+        /* Make the switch button tiny so it fits nicely on mobile */
+        .btn-move { padding: 0.1rem 0.3rem; font-size: 0.8rem; }
+        .court-select { display:inline-block; width:auto; font-size:0.75rem; padding:0.1rem 0.3rem; }
+    </style>
+</head>
 
-import os, requests, smtplib, uuid
-from flask import Flask, render_template, request, session, redirect, url_for, flash, jsonify
-import datetime as dt
-from datetime import timedelta
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import time
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
-
-# === SECTION 1: SETUP & CONFIG ===
-API_KEY = os.environ.get("AIRTABLE_API_KEY")
-BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
-ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
-W_KEY = os.environ.get("WEATHER_API_KEY") # No longer strictly needed for Open-Meteo, kept for legacy
-FROM_EMAIL = os.environ.get("FROM_EMAIL") 
-GMAIL_PW = os.environ.get("GMAIL_PASSWORD") 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", FROM_EMAIL) 
-SITE_URL = "https://saturday-tennis.onrender.com"
-
-HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-
-# === SECTION 2: UTILITY FUNCTIONS ===
-def log_activity(name, action):
-    try:
-        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Logs", headers=HEADERS, 
-                      json={"fields": {"Name": name, "Action": action}})
-    except: pass
-
-def send_email(to_emails, subject, html_content, is_multiple=False):
-    if not FROM_EMAIL or not GMAIL_PW or not to_emails: return
-    if isinstance(to_emails, str): to_emails = [to_emails]
-    msg = MIMEMultipart()
-    msg['From'] = FROM_EMAIL
-    msg['Subject'] = subject
-    if is_multiple:
-        msg['To'] = FROM_EMAIL 
-        recipients = to_emails + [FROM_EMAIL]
-    else:
-        msg['To'] = to_emails[0]
-        recipients = to_emails
-    msg.attach(MIMEText(html_content, 'html'))
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(FROM_EMAIL, GMAIL_PW)
-        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
-        server.quit()
-    except Exception as e: print(f"Email Error: {e}")
-
-def find_player_matches(first, last, master_list):
-    """Return (exact_matches, near_matches) from Master List.
-    Exact = both first and last match (case-insensitive).
-    Near  = either first OR last matches, or either starts with the typed string."""
-    fl, ll = first.strip().lower(), last.strip().lower()
-    exact, near = [], []
-    for m in master_list:
-        mf = m['fields'].get('First', '').strip().lower()
-        mlv = m['fields'].get('Last', '').strip().lower()
-        if mf == fl and mlv == ll:
-            exact.append(m)
-        elif fl and ll and (mf == fl or mlv == ll or mf.startswith(fl) or mlv.startswith(ll)):
-            near.append(m)
-    return exact, near
-
-def next_player_code(master_list):
-    """Return the next unused 4-digit player code as a string."""
-    codes = []
-    for m in master_list:
-        c = str(m['fields'].get('Code', '')).strip()
-        if c.endswith('.0'): c = c[:-2]
-        if c.isdigit() and 1000 < int(c) < 9000:
-            codes.append(int(c))
-    return str(max(codes, default=1000) + 1)
-
-def build_court_map(n_courts, group_sizes, overrides, prefix=''):
-    """
-    Auto-assign logical courts (1..n) to physical courts 1-6.
-    Courts 3 & 6 (end of each cluster) are preferred for partial groups (<4 players).
-    Courts 1-2, 4-5 (middle of each cluster) are preferred for full groups.
-    overrides: {str(logical): int(physical)} from Settings JSON.
-    prefix: string prepended to override keys (e.g. 'T_' for Team mode).
-    Returns: {logical_int: physical_int}
-    """
-    if n_courts == 0:
-        return {}
-
-    end_courts   = [3, 6]
-    mid_courts   = [1, 2, 4, 5]
-    all_courts   = [1, 2, 3, 4, 5, 6]
-
-    assignment = {}
-    used = set()
-
-    # Pass 1: partial groups get end courts (3, then 6)
-    for i in range(n_courts):
-        size = group_sizes[i] if i < len(group_sizes) else 4
-        if size < 4:
-            for c in end_courts:
-                if c not in used:
-                    assignment[i + 1] = c
-                    used.add(c)
-                    break
-
-    # Pass 2: full groups fill middle courts first, then whatever's left
-    for i in range(n_courts):
-        if (i + 1) not in assignment:
-            for c in mid_courts + end_courts + all_courts:
-                if c not in used:
-                    assignment[i + 1] = c
-                    used.add(c)
-                    break
-
-    # Apply admin overrides (stored as prefix+str(logical) → physical)
-    for k, v in overrides.items():
-        if prefix:
-            if not k.startswith(prefix):
-                continue
-            k = k[len(prefix):]
-        try:
-            assignment[int(k)] = int(v)
-        except:
-            pass
-
-    return assignment
-
-# === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION) ===
-AIRTABLE_CACHE = {}
-PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
-MAINTENANCE_MODE = False    # when True, only admin can sign up or create teams
-CACHE_TTL = 300       # cache successful fetches for 5 min — well within Airtable Team plan quota
-ERROR_CACHE_TTL = 30  # on failure, hold the empty/stale result for 30s before retrying
-
-def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formula=None):
-    current_time = time.time()
-    cache_key = f"{table_name}_{sort_field}_{direction}_{filter_formula}"
-
-    if cache_key in AIRTABLE_CACHE:
-        cached_time, cached_data = AIRTABLE_CACHE[cache_key]
-        if current_time - cached_time < CACHE_TTL:
-            return cached_data
-
-    records = []
-    offset = None
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name}"
-
-    try:
-        while True:
-            params = {}
-            if sort_field:
-                params["sort[0][field]"] = sort_field
-                params["sort[0][direction]"] = direction
-            if filter_formula:
-                params["filterByFormula"] = filter_formula
-            if offset:
-                params["offset"] = offset
-
-            # Timeout prevents a slow/hung Airtable call from tying up the gunicorn worker
-            res = requests.get(url, headers=HEADERS, params=params, timeout=10)
-            res.raise_for_status()
-            data = res.json()
-            records.extend(data.get('records', []))
-
-            offset = data.get('offset')
-            if not offset:
-                break
-
-        AIRTABLE_CACHE[cache_key] = (current_time, records)
-        return records
-    except Exception as e:
-        print(f"Airtable Fetch Error ({table_name}): {e}")
-        # CRITICAL: cache the failure too. Otherwise every page reload retries
-        # immediately, which during a 429 window keeps the rate-limit alive
-        # forever and the site never recovers on its own.
-        # If we have prior good data, keep serving it (stale-while-error). Otherwise
-        # cache an empty list briefly so we stop hammering the API.
-        if cache_key in AIRTABLE_CACHE:
-            _, stale_data = AIRTABLE_CACHE[cache_key]
-            AIRTABLE_CACHE[cache_key] = (current_time - (CACHE_TTL - ERROR_CACHE_TTL), stale_data)
-            return stale_data
-        AIRTABLE_CACHE[cache_key] = (current_time - (CACHE_TTL - ERROR_CACHE_TTL), [])
-        return []
-
-# === SORT KEY for manual roster ordering ===
-# Records with a "Manual Order" number sort first (ascending).
-# Records without it fall back to Airtable's createdTime (original behavior).
-def sort_key(r):
-    manual = r.get('fields', {}).get('Manual Order')
-    if manual is not None:
-        return (0, float(manual), '')
-    return (1, 0.0, r.get('createdTime', ''))
-
-# === SECTION 4: PRIMARY ROUTES ===
-@app.route('/')
-def index():
-    settings = get_airtable_data("Settings")
-    d_date, d_start, d_end = "TBD", "TBD", ""
-    play_mode = "Open"
-    start_dt = None
-    if settings:
-        f = settings[0]['fields']
-        d_date, d_start = f.get('Target Date', 'TBD'), f.get('Start Time', 'TBD')
-        play_mode = f.get('Play Mode', 'Open')
-        try:
-            start_dt = dt.datetime.strptime(d_start, "%I:%M %p")
-            d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
-        except: d_end = ""
-
-    # Priority order: module-level override > session override > Airtable cache
-    # Module-level var is set by toggle_mode_direct and survives cache expiry
-    if PLAY_MODE_OVERRIDE and PLAY_MODE_OVERRIDE in ('Open', 'Split', 'Team'):
-        play_mode = PLAY_MODE_OVERRIDE
-    elif 'forced_play_mode' in session:
-        play_mode = session.pop('forced_play_mode')
-        session.modified = True
-
-    # Maintenance mode: read from Airtable (persists across restarts), module var as same-session override
-    maintenance_mode = MAINTENANCE_MODE or bool(
-        settings[0]['fields'].get('Maintenance Mode', False) if settings else False
-    )
-
-    master_recs = get_airtable_data("Master List", sort_field="First")
-    strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
-    signup_recs = sorted(get_airtable_data("Signups"), key=sort_key)
-    
-    roster = []
-    for r in signup_recs:
-        f = r['fields']; f['id'] = r['id']
-        f['strikes'] = strike_map.get(str(f.get('Player Code')), 0)
-        roster.append(f)
-
-    lower_roster, upper_roster = [], []
-    lower_cutoff, upper_cutoff = 12, 12
-    total_signups = len(roster)
-    playing_cutoff = (min(total_signups, 24) // 4) * 4
-    waitlist_count = total_signups - playing_cutoff
-
-    user_on_roster, waitlist_pos, pending_sub_offer = False, 0, False
-    curr_user = session.get('user')
-    my_team_id = None   # set below if user is on a team
-
-    if play_mode == 'Split':
-        lower_roster = [p for p in roster if p.get('Level') == '3.0/3.5']
-        upper_roster = [p for p in roster if p.get('Level') == '4.0/4.5']
-        lower_cutoff = (min(len(lower_roster), 12) // 4) * 4
-        upper_cutoff = (min(len(upper_roster), 12) // 4) * 4
-
-        if curr_user:
-            for i, p in enumerate(lower_roster):
-                if str(p.get('Player Code')) == str(curr_user.get('code')):
-                    user_on_roster = True
-                    if i >= lower_cutoff: waitlist_pos = i - lower_cutoff + 1
-            for i, p in enumerate(upper_roster):
-                if str(p.get('Player Code')) == str(curr_user.get('code')):
-                    user_on_roster = True
-                    if i >= upper_cutoff: waitlist_pos = i - upper_cutoff + 1
-            for p in roster:
-                if str(p.get('Sub Offer')) == str(curr_user.get('code')):
-                    pending_sub_offer = True
-    else:
-        if curr_user:
-            for i, p in enumerate(roster):
-                if str(p.get('Player Code')) == str(curr_user.get('code')):
-                    user_on_roster = True
-                    my_team_id = p.get('Team ID')
-                    if play_mode == 'Open' and i >= playing_cutoff:
-                        waitlist_pos = i - playing_cutoff + 1
-                if play_mode == 'Open' and str(p.get('Sub Offer')) == str(curr_user.get('code')):
-                    pending_sub_offer = True
-
-    # Build team_list for Team mode roster display
-    team_list    = []
-    pending_teams = []
-    if play_mode == 'Team':
-        teams_dict = {}
-        for p in roster:
-            tid = p.get('Team ID') or f"__solo_{p.get('id','')}"
-            if tid not in teams_dict:
-                teams_dict[tid] = []
-            teams_dict[tid].append(p)
-        for tid, players in teams_dict.items():
-            captain  = next((p for p in players if p.get('Is Captain')), players[0] if players else None)
-            status   = (captain.get('Team Status') or 'Approved') if captain else 'Approved'
-            req_c    = int(captain.get('Requested Courts') or 1) if captain else 1
-            app_c    = int(captain.get('Approved Courts')  or req_c) if captain else req_c
-            reserves = [p for p in players if p.get('Is Reserve')]
-            courts_p = [p for p in players if not p.get('Is Reserve')]
-            reserves = [p for p in players if p.get('Is Reserve')]
-            # Group by stored Court Num field (not sequential position)
-            court_groups = {}
-            for p in courts_p:
-                cn = int(float(p.get('Court Num') or 1))
-                court_groups.setdefault(cn, []).append(p)
-            courts = [court_groups.get(cn, []) for cn in range(1, app_c + 1)]
-            # Always show approved_courts courts, padding with empty lists for TBD
-            while len(courts) < app_c:
-                courts.append([])
-            team_data = {
-                'team_id': tid, 'captain': captain, 'courts': courts,
-                'reserves': reserves, 'status': status,
-                'requested_courts': req_c, 'approved_courts': app_c
-            }
-            if status == 'Pending':
-                pending_teams.append(team_data)
-            else:
-                team_list.append(team_data)
-
-    weather_info = "Weather Unavailable"
-    try:
-        # Open-Meteo - 14-day forecast, Free, No API Key required
-        lat, lon = "39.9936", "-105.0897" # Lafayette, CO Coordinates
-        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,weathercode&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=14"
-        w_res = requests.get(weather_url).json()
-
-        # Calculate the upcoming Saturday based on today
-        today = dt.date.today()
-        days_ahead = 5 - today.weekday()
-        if days_ahead < 0: days_ahead += 7
-        target_date = today + dt.timedelta(days=days_ahead)
-        target_date_iso = target_date.isoformat() 
-            
-        s_hour = start_dt.hour if start_dt else 9
-        end_dt = start_dt + timedelta(hours=2, minutes=15) if start_dt else None
-        e_hour = min(end_dt.hour, 23) if end_dt else 11
+{# ── Court reassign dropdown macro (admin only) ─────────────────────────────
+   logical : the 1-based position key used in court_map
+   physical: the currently-assigned physical court number (1-6)
+   prefix  : key prefix stored in Settings JSON  ('', 'L', 'U', 'T_')
+#}
+{% macro court_picker(logical, physical, prefix='') %}
+{% if session.get('user') and session.user.get('is_admin') %}
+<form action="/admin_action" method="POST" class="d-inline ms-1">
+    <input type="hidden" name="action"   value="assign_court">
+    <input type="hidden" name="logical"  value="{{ logical }}">
+    <input type="hidden" name="prefix"   value="{{ prefix }}">
+    <select name="physical" class="form-select form-select-sm court-select"
+            title="Reassign physical court" onchange="this.form.submit()">
+        {% for c in range(1, 7) %}
+        <option value="{{ c }}" {% if c == physical %}selected{% endif %}>Court {{ c }}</option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endmacro %}
+<body>
+    <div class="container py-4">
         
-        start_time_str = f"{target_date_iso}T{s_hour:02d}:00"
-        end_time_str = f"{target_date_iso}T{e_hour:02d}:00"
-
-        times = w_res.get('hourly', {}).get('time', [])
-        temps = w_res.get('hourly', {}).get('temperature_2m', [])
-        codes = w_res.get('hourly', {}).get('weathercode', [])
-
-        if start_time_str in times:
-            s_idx = times.index(start_time_str)
-            e_idx = times.index(end_time_str) if end_time_str in times else s_idx + 2
+        <div class="text-center mb-4">
+            <h1 class="display-5 fw-bold text-success">🎾 Saturday Tennis Gang</h1>
+            <h3 class="text-secondary">@ Dawson School</h3>
+            <p class="lead mb-1"><strong>{{ target_date }}</strong> | {{ start_time }}{{ end_time }}</p>
+            <span class="badge bg-info text-dark shadow-sm fs-5 mb-3">{{ weather }}</span>
             
-            temp_start = int(temps[s_idx])
-            temp_end = int(temps[e_idx])
-            w_code = codes[s_idx]
-            
-            # WMO Weather code mapping
-            code_map = {
-                0: "Clear", 1: "Mostly Clear", 2: "Partly Cloudy", 3: "Overcast",
-                45: "Fog", 48: "Fog", 51: "Drizzle", 53: "Drizzle", 55: "Drizzle",
-                61: "Rain", 63: "Rain", 65: "Heavy Rain", 71: "Snow", 73: "Snow",
-                75: "Heavy Snow", 95: "Thunderstorm"
+            <div class="mt-1">
+                {% if maintenance_mode %}
+                <div class="alert alert-warning text-center py-2 mb-2 fw-bold border-warning">
+                    🛠 Site Maintenance In Progress — signups paused briefly, back shortly!
+                </div>
+                {% endif %}
+                {% if play_mode == 'Split' %}
+                    <div class="alert alert-primary py-2 d-inline-block border-primary shadow-sm mb-2">
+                        <h5 class="mb-0 fw-bold">🎾 SPLIT MODE ACTIVE</h5>
+                        <small class="text-dark">Courts are divided by skill level (3.0/3.5 and 4.0/4.5).</small>
+                    </div>
+                {% elif play_mode == 'Team' %}
+                    <div class="alert alert-warning py-2 d-inline-block border-warning shadow-sm mb-2">
+                        <h5 class="mb-0 fw-bold">🏆 TEAM MODE ACTIVE</h5>
+                        <small class="text-dark">Captains sign up a full court (4–8 players). Log in and click <b>Start a Team</b>.</small>
+                    </div>
+                {% else %}
+                    <div class="alert alert-success py-2 d-inline-block border-success shadow-sm mb-2">
+                        <h5 class="mb-0 fw-bold">🎾 OPEN MODE ACTIVE</h5>
+                        <small class="text-dark">All members play together in a single combined list.</small>
+                    </div>
+                    <div class="d-block mt-1">
+                        <span class="badge bg-success fs-6 me-1">{{ playing_cutoff }} Playing</span>
+                        <span class="badge bg-warning text-dark fs-6 me-1">{{ waitlist_count }} Waitlisted</span>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
+            <div class="alert alert-danger shadow-sm text-center border-danger mb-4">
+                <h4 class="alert-heading fw-bold mb-1">🚨 Action Required!</h4>
+                <p class="mb-0">Your account is temporarily locked. Please confirm your contact info and assign your play level to continue.</p>
+            </div>
+        {% endif %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+            {% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="row">
+            <div class="col-lg-4 col-md-5 mb-4">
+                {% if session.get('user') %}
+                    <div class="card shadow border-success mb-4 text-center">
+                        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">{{ session.user.get('first') }}</h5>
+                            <div>
+                                <button class="btn btn-sm btn-outline-light me-1" data-bs-toggle="modal" data-bs-target="#profileModal">Profile</button>
+                                <a href="/logout" class="btn btn-sm btn-light">Logout</a>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            {% if session.user.get('is_admin') %}
+                                <div class="p-3 mb-3 text-start admin-sidebar-box">
+                                    <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
+
+                                    <form action="/admin_action" method="POST" class="mb-3">
+                                        <input type="hidden" name="action" value="toggle_maintenance">
+                                        <button class="btn btn-sm w-100 fw-bold {% if maintenance_mode %}btn-danger{% else %}btn-outline-secondary{% endif %}">
+                                            🔒 Maintenance: {% if maintenance_mode %}ON — Only You{% else %}OFF{% endif %}
+                                        </button>
+                                    </form>
+
+                                    <div class="mb-3">
+                                        <p class="small text-muted mb-1 fw-bold">Play Mode</p>
+                                        {% for mode in ['Open', 'Split', 'Team'] %}
+                                        <form action="/admin_action" method="POST" class="mb-1">
+                                            <input type="hidden" name="action" value="toggle_mode_direct">
+                                            <input type="hidden" name="new_mode" value="{{ mode }}">
+                                            <button class="btn btn-sm w-100 {% if play_mode == mode %}btn-primary fw-bold{% else %}btn-outline-secondary{% endif %}">
+                                                {% if play_mode == mode %}✓ {% endif %}{{ mode }} Mode
+                                            </button>
+                                        </form>
+                                        {% endfor %}
+                                    </div>
+
+                                    <form action="/admin_action" method="POST" class="mb-3">
+                                        <input type="hidden" name="action" value="toggle_venmo">
+                                        <button class="btn btn-sm w-100 fw-bold shadow-sm {% if show_venmo %}btn-info{% else %}btn-outline-secondary{% endif %}">
+                                            💙 Venmo Card: {% if show_venmo %}ON{% else %}OFF{% endif %}
+                                        </button>
+                                    </form>
+
+                                    <form action="/admin_action" method="POST" class="mb-3"
+                                          onsubmit="return confirm('Reset all court assignments to auto?')">
+                                        <input type="hidden" name="action" value="reset_courts">
+                                        <button class="btn btn-sm btn-outline-warning w-100">🔄 Reset Court Assignments</button>
+                                    </form>
+
+                                    <h6 class="small fw-bold mt-2">📣 Message Blast</h6>
+                                    <form action="/info_blast" method="POST" class="mb-3">
+                                        <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Message..." required></textarea>
+                                        <select name="target_group" class="form-select form-select-sm mb-2">
+                                            <option value="roster">Roster Only</option>
+                                            <option value="master">Entire List</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-danger w-100">Send Blast</button>
+                                    </form>
+                                    <h6 class="small fw-bold">📅 Session Update</h6>
+                                    <form action="/admin_action" method="POST">
+                                        <input type="hidden" name="action" value="labels">
+                                        <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
+                                        <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
+                                        <button class="btn btn-sm btn-outline-dark w-100 mb-2">Update Info</button>
+                                    </form>
+                                    <form action="/admin_action" method="POST" onsubmit="return confirm('Archive and clear entire roster?');">
+                                        <input type="hidden" name="action" value="reset_roster">
+                                        <button class="btn btn-sm btn-dark w-100">Reset System</button>
+                                    </form>
+                                </div>
+                            {% endif %}
+
+                            {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}
+                                <button class="btn btn-danger btn-lg w-100 fw-bold shadow" data-bs-toggle="modal" data-bs-target="#profileModal">
+                                    Review Profile to Unlock
+                                </button>
+                            {% else %}
+                                {% if pending_sub_offer %}
+                                    <div class="alert alert-warning border-warning shadow-sm">
+                                        <h5 class="mb-1">Sub Spot!</h5>
+                                        <form action="/accept_sub" method="POST"><button class="btn btn-success w-100 fw-bold">Accept Spot</button></form>
+                                    </div>
+                                {% endif %}
+
+                                {% if user_on_roster %}
+                                    <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
+                                    {% if play_mode == 'Team' and my_team_id %}
+                                        {% for team in team_list %}{% if team.team_id == my_team_id %}{% if team.captain and team.captain.get('Player Code')|string == session.user.get('code')|string %}
+                                        <button class="btn btn-warning w-100 fw-bold mb-2 edit-team-btn"
+                                                data-team-id="{{ team.team_id }}">
+                                            ✏️ Edit My Team
+                                        </button>
+                                        {% endif %}{% endif %}{% endfor %}
+                                    {% endif %}
+                                    <form action="/cancel" method="POST"><button class="btn btn-outline-danger w-100">Cancel Spot</button></form>
+                                {% else %}
+                                    {% if play_mode == 'Team' %}
+                                        <button class="btn btn-warning btn-lg w-100 fw-bold shadow"
+                                                onclick="openTeamModal(null, null)">
+                                            🏆 Start a Team
+                                        </button>
+                                        <p class="text-muted small mt-2">You'll be the captain. Add 3–7 teammates.</p>
+                                    {% else %}
+                                    <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button></form>
+                                    {% endif %}
+                                {% endif %}
+
+                                <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Request Guest</button>
+                                <div id="guestForm" class="collapse mt-2 text-start p-2 border rounded bg-light">
+                                    <form action="/request_guest" method="POST">
+                                        <input type="text" name="guest_first" class="form-control form-control-sm mb-1" placeholder="First Name" required>
+                                        <input type="text" name="guest_last" class="form-control form-control-sm mb-2" placeholder="Last Name" required>
+                                        <button class="btn btn-sm btn-info text-white w-100">Submit Request</button>
+                                    </form>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="modal fade" id="profileModal" tabindex="-1" {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}data-bs-backdrop="static" data-bs-keyboard="false"{% endif %}>
+                        <div class="modal-dialog">
+                            <form action="/update_profile" method="POST" class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}text-danger fw-bold{% endif %}">Profile Review</h5>
+                                    {% if session.user.get('contact_confirmed') and session.user.get('level') %}<button type="button" class="btn-close" data-bs-dismiss="modal"></button>{% endif %}
+                                </div>
+                                <div class="modal-body text-start">
+                                    {% if not session.user.get('contact_confirmed') %}
+                                        <div class="alert alert-warning small">Please confirm your email and phone number. Both are required so subs can reach you.</div>
+                                    {% endif %}
+                                    
+                                    <div class="mb-3 p-3 bg-light border rounded">
+                                        <label class="form-label small fw-bold">Your Play Level</label>
+                                        {% if not session.user.get('level') %}
+                                            <p class="small text-muted mb-1">Select your level below. This locks your initial court routing for "Split Court" days.</p>
+                                            <select name="level" class="form-select" required>
+                                                <option value="" disabled selected>Select Level...</option>
+                                                <option value="3.0/3.5">3.0 / 3.5</option>
+                                                <option value="4.0/4.5">4.0 / 4.5</option>
+                                            </select>
+                                        {% else %}
+                                            <input type="text" class="form-control mb-1 fw-bold text-primary" value="{{ session.user.get('level') }}" disabled>
+                                            <small class="text-muted fst-italic">Contact admin to change your level.</small>
+                                        {% endif %}
+                                    </div>
+
+                                    <label class="form-label small fw-bold">Email</label>
+                                    <input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email', '') }}" required>
+                                    <label class="form-label small fw-bold">Phone</label>
+                                    <input type="text" name="phone" class="form-control" value="{{ session.user.get('phone', '') }}" required>
+                                </div>
+                                <div class="modal-footer">
+                                    {% if session.user.get('contact_confirmed') and session.user.get('level') %}<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>{% endif %}
+                                    <button type="submit" class="btn btn-success fw-bold">{% if not session.user.get('contact_confirmed') or not session.user.get('level') %}Confirm & Unlock Site{% else %}Save Changes{% endif %}</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                {% else %}
+                    <div class="card shadow mb-4">
+                        <div class="card-header bg-primary text-white"><h5>Player Login</h5></div>
+                        <div class="card-body text-center">
+                            <form action="/validate" method="POST">
+                                <div class="mb-3 text-start"><label class="form-label small fw-bold">4-Digit Code</label><input type="number" name="code" class="form-control form-control-lg" required></div>
+                                <div class="mb-3 text-start"><label class="form-label small fw-bold">Admin Password</label><input type="password" name="password" class="form-control"></div>
+                                <button type="submit" class="btn btn-primary w-100 fw-bold">Enter</button>
+                            </form>
+                            <hr>
+                            <p class="mb-0">New here?</p>
+                            <button class="btn btn-link text-success fw-bold p-0" data-bs-toggle="collapse" data-bs-target="#applyForm">Apply to Join the Gang</button>
+                            <div id="applyForm" class="collapse mt-3">
+                                <form action="/apply" method="POST" class="p-3 border rounded bg-light shadow-sm text-start">
+                                    <input type="text" name="first" class="form-control mb-2" placeholder="First Name" required>
+                                    <input type="text" name="last" class="form-control mb-2" placeholder="Last Name" required>
+                                    <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
+                                    <button class="btn btn-success w-100">Submit Application</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- Venmo chip-in card — controlled by admin toggle -->
+                {% if session.get('user') and show_venmo %}
+                <div class="card shadow-sm mb-4 text-center" style="background:#EAF4FF; border: 1px solid #008CFF55 !important;">
+                    <div class="card-body py-3">
+                        <p class="mb-1 small text-muted">Airtable keeps this site running.<br>Chip in if you'd like! 🙏</p>
+                        <a href="https://venmo.com/James-Piccolini" target="_blank" rel="noopener"
+                           class="btn btn-sm fw-bold text-white"
+                           style="background-color:#008CFF; border-color:#008CFF;">
+                            💙 Venmo @James-Piccolini
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+
+            <div class="col-lg-8 col-md-7">
+                <div class="card shadow mb-4 border-dark">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#rosterCollapse">
+                        <h4 class="mb-0">Live Roster 🔽</h4>
+                    </div>
+                    <div id="rosterCollapse" class="collapse show">
+                        <div class="card-body p-3" style="background-color: #eee;">
+                            
+                            {% if play_mode == 'Open' %}
+                                {% for player in roster %}
+                                    {% if loop.index0 % 4 == 0 %}
+                                        {% set logical = (loop.index0 // 4) + 1 %}
+                                        {% set physical = court_map.get(logical, logical) %}
+                                        {% if loop.index0 < playing_cutoff %}
+                                            <h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">
+                                                🎾 Court {{ physical }}
+                                            </h6>
+                                        {% elif loop.index0 == playing_cutoff %}
+                                            <h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist</h6>
+                                        {% endif %}
+                                    {% endif %}
+                                    <div class="list-group-item d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-white roster-card {% if loop.index0 >= playing_cutoff %}waitlist-card{% endif %} shadow-sm">
+                                        <div>
+                                            <span class="fw-bold">{{ loop.index }}. {{ player.get('First', '') }} {{ player.get('Last', '') }}</span>
+                                            {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-2">{{ player.get('Label') }}</span>{% endif %}
+                                        </div>
+                                        {% if session.get('user') and session.user.get('is_admin') %}
+                                        <div class="d-flex gap-1">
+                                            <form action="/reorder" method="POST" class="m-0 p-0">
+                                                <input type="hidden" name="record_id" value="{{ player.get('id') }}">
+                                                <input type="hidden" name="direction" value="up">
+                                                <button type="submit" class="btn btn-outline-secondary btn-move" title="Move Up" {% if loop.first %}disabled{% endif %}>▲</button>
+                                            </form>
+                                            <form action="/reorder" method="POST" class="m-0 p-0">
+                                                <input type="hidden" name="record_id" value="{{ player.get('id') }}">
+                                                <input type="hidden" name="direction" value="down">
+                                                <button type="submit" class="btn btn-outline-secondary btn-move" title="Move Down" {% if loop.last %}disabled{% endif %}>▼</button>
+                                            </form>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                                {% if not roster %}<div class="text-center py-5 text-muted">No one has signed up yet.</div>{% endif %}
+
+                            {% elif play_mode == 'Team' %}
+
+                                {# ── PENDING TEAMS (admin only) ──────────────────────── #}
+                                {% if session.get('user') and session.user.get('is_admin') and pending_teams %}
+                                <div class="alert alert-warning border-warning mb-3">
+                                    <h6 class="fw-bold mb-2">⏳ Pending Team Requests ({{ pending_teams|length }})</h6>
+                                    {% for team in pending_teams %}
+                                        {% set captain = team.captain %}
+                                        <div class="p-2 border rounded bg-white mb-2 shadow-sm">
+                                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                                <div>
+                                                    {% set total_players = namespace(n=0) %}
+                                                    {% for c in team.courts %}{% set total_players.n = total_players.n + c|length %}{% endfor %}
+                                                    <b>{{ captain.get('First','?') }} {{ captain.get('Last','') }}</b>
+                                                    — requested <b>{{ team.requested_courts }} court(s)</b>
+                                                    ({{ total_players.n }} player{{ 's' if total_players.n != 1 else '' }}{% if team.reserves %} + {{ team.reserves|length }} reserve(s){% endif %})
+                                                    <div class="small text-muted mt-1">
+                                                        {% for court in team.courts %}
+                                                            <b>Court {{ loop.index }}:</b>
+                                                            {% for p in court %}{{ p.get('First','') }} {{ p.get('Last','') }}{% if not loop.last %}, {% endif %}{% endfor %}
+                                                            ({{ court|length }}/4)
+                                                            {% if not loop.last %} &nbsp;|&nbsp; {% endif %}
+                                                        {% endfor %}
+                                                        {% if team.reserves %}
+                                                            &nbsp;| <b>Reserves:</b>
+                                                            {% for r in team.reserves %}{{ r.get('First','') }} {{ r.get('Last','') }}{% if not loop.last %}, {% endif %}{% endfor %}
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                                <form action="/team/approve/{{ team.team_id }}" method="POST"
+                                                      class="d-flex align-items-center gap-2 flex-shrink-0">
+                                                    <label class="small mb-0">Approve</label>
+                                                    <select name="approved_courts" class="form-select form-select-sm" style="width:auto">
+                                                        {% for c in range(1, team.requested_courts + 1) %}
+                                                        <option value="{{ c }}" {% if c == team.requested_courts %}selected{% endif %}>{{ c }} court(s)</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <button type="submit" class="btn btn-sm btn-success fw-bold">✓ Approve</button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+
+                                {# ── APPROVED TEAMS ──────────────────────────────────── #}
+                                {% if not team_list %}
+                                    <div class="text-center py-5 text-muted">
+                                        No approved teams yet.
+                                        {% if not (session.get('user') and session.user.get('is_admin')) %}
+                                        Log in and click <b>Start a Team</b> to submit a court request.
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                                {% for team in team_list %}
+                                    {% set captain = team.captain %}
+                                    <div class="mb-4 p-3 border rounded bg-white shadow-sm">
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <h6 class="mb-0 fw-bold text-warning">
+                                                🏆 {{ captain.get('First','?') }} {{ captain.get('Last','') }}'s Team
+                                                <span class="badge bg-secondary ms-1">{{ team.courts | length }} court(s)</span>
+                                            </h6>
+                                        {% if session.get('user') %}
+                                            {% set am_captain = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
+                                            {% if am_captain %}
+                                            <button class="btn btn-sm btn-outline-warning edit-team-btn"
+                                                    data-team-id="{{ team.team_id }}">
+                                                ✏️ Edit
+                                            </button>
+                                            {% endif %}
+                                        {% endif %}
+                                        </div>
+                                        {# Courts #}
+                                        {% set ns = namespace(team_court_seq=0) %}
+                                        {% for court in team.courts %}
+                                            {% set ns.team_court_seq = ns.team_court_seq + 1 %}
+                                            {% set phys_key = (team.team_id, loop.index) %}
+                                            {% set physical = court_map.get(phys_key, loop.index) %}
+                                            <h6 class="text-success fw-bold small mt-2">
+                                                🎾 Court {{ physical }}
+                                                {{ court_picker(ns.team_court_seq, physical, 'T_') }}
+                                            </h6>
+                                            {% for player in court %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded bg-light small roster-card">
+                                                    <span>
+                                                        <b>{{ player.get('First','') }} {{ player.get('Last','') }}</b>
+                                                        {% if player.get('Is Captain') %}<span class="badge bg-warning text-dark ms-1">Captain</span>{% endif %}
+                                                        {% if player.get('Label') %}<span class="badge bg-info text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
+                                                    </span>
+                                                    {% if session.get('user') %}
+                                                        {% set am_captain_here = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
+                                                        {% if (am_captain_here and not player.get('Is Captain')) or session.user.get('is_admin') %}
+                                                        <form action="/team/remove_player/{{ player.get('id') }}" method="POST" class="m-0 p-0"
+                                                              onsubmit="return confirm('Remove {{ player.get('First','') }} from your team?')">
+                                                            <button type="submit" class="btn btn-outline-danger btn-move" title="Remove">✕</button>
+                                                        </form>
+                                                        {% endif %}
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                            {% for i in range(4 - court|length) %}
+                                                <div class="list-group-item mb-1 p-2 border rounded small text-muted fst-italic"
+                                                     style="background:#f8f9fa; border-style:dashed !important;">
+                                                    TBD — spot open
+                                                </div>
+                                            {% endfor %}
+                                        {% endfor %}
+                                        {# Reserves #}
+                                        {% if team.reserves %}
+                                        <div class="mt-2 pt-2 border-top">
+                                            <h6 class="text-secondary fw-bold small mb-1">📋 Reserves</h6>
+                                            {% for player in team.reserves %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded small" style="background:#f8f9fa; border-style:dashed !important;">
+                                                    <span class="text-muted">{{ player.get('First','') }} {{ player.get('Last','') }}</span>
+                                                    {% if session.get('user') %}
+                                                        {% set am_cap_res = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
+                                                        {% if am_cap_res or session.user.get('is_admin') %}
+                                                        <form action="/team/remove_player/{{ player.get('id') }}" method="POST" class="m-0 p-0"
+                                                              onsubmit="return confirm('Remove {{ player.get('First','') }} from reserves?')">
+                                                            <button type="submit" class="btn btn-outline-danger btn-move" title="Remove">✕</button>
+                                                        </form>
+                                                        {% endif %}
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            
+                            {% else %}
+                                <div class="row">
+                                    <div class="col-md-6 mb-4">
+                                        <div class="p-2 bg-white rounded shadow-sm border h-100">
+                                            <h5 class="text-center text-primary fw-bold mb-0">3.0 / 3.5 Courts</h5>
+                                            <p class="text-center small text-muted border-bottom pb-2 mb-2">3 Courts Reserved</p>
+                                            
+                                            {% for player in lower_roster %}
+                                                {% if loop.index0 % 4 == 0 %}
+                                                    {% set logical = (loop.index0 // 4) + 1 %}
+                                                    {% set physical = lower_court_map.get(logical, logical) %}
+                                                    {% if loop.index0 < lower_cutoff %}
+                                                        <h6 class="mt-2 text-success fw-bold small">
+                                                            🎾 Court {{ physical }}
+                                                        </h6>
+                                                    {% elif loop.index0 == lower_cutoff %}
+                                                        <h6 class="mt-3 text-warning fw-bold small">⏳ Waitlist</h6>
+                                                    {% endif %}
+                                                {% endif %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded bg-light small {% if loop.index0 >= lower_cutoff %}waitlist-card{% else %}roster-card{% endif %}">
+                                                    <span><b>{{ loop.index }}.</b> {{ player.get('First', '') }} {{ player.get('Last', '') }}
+                                                        {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
+                                                    </span>
+                                                    {% if session.get('user') and session.user.get('is_admin') %}
+                                                        <form action="/move_player/{{ player.id }}" method="POST" class="m-0 p-0">
+                                                            <input type="hidden" name="current_level" value="3.0/3.5">
+                                                            <button type="submit" class="btn btn-outline-dark btn-move" title="Move to 4.0/4.5 Group">↔️</button>
+                                                        </form>
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                            {% if not lower_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6 mb-4">
+                                        <div class="p-2 bg-white rounded shadow-sm border h-100">
+                                            <h5 class="text-center text-danger fw-bold mb-0">4.0 / 4.5 Courts</h5>
+                                            <p class="text-center small text-muted border-bottom pb-2 mb-2">3 Courts Reserved</p>
+                                            
+                                            {% for player in upper_roster %}
+                                                {% if loop.index0 % 4 == 0 %}
+                                                    {% set logical = (loop.index0 // 4) + 1 %}
+                                                    {% set physical = upper_court_map.get(logical, logical + 3) %}
+                                                    {% if loop.index0 < upper_cutoff %}
+                                                        <h6 class="mt-2 text-success fw-bold small">
+                                                            🎾 Court {{ physical }}
+                                                        </h6>
+                                                    {% elif loop.index0 == upper_cutoff %}
+                                                        <h6 class="mt-3 text-warning fw-bold small">⏳ Waitlist</h6>
+                                                    {% endif %}
+                                                {% endif %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded bg-light small {% if loop.index0 >= upper_cutoff %}waitlist-card{% else %}roster-card{% endif %}">
+                                                    <span><b>{{ loop.index }}.</b> {{ player.get('First', '') }} {{ player.get('Last', '') }}
+                                                        {% if player.get('Label') %}<span class="badge bg-warning text-dark ms-1">{{ player.get('Label') }}</span>{% endif %}
+                                                    </span>
+                                                    {% if session.get('user') and session.user.get('is_admin') %}
+                                                        <form action="/move_player/{{ player.id }}" method="POST" class="m-0 p-0">
+                                                            <input type="hidden" name="current_level" value="4.0/4.5">
+                                                            <button type="submit" class="btn btn-outline-dark btn-move" title="Move to 3.0/3.5 Group">↔️</button>
+                                                        </form>
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                            {% if not upper_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            
+                        </div>
+                    </div>
+                </div>
+
+                {% if session.get('user') and session.user.get('is_admin') %}
+                <div class="card shadow border-danger mb-4">
+                    <div class="card-header bg-danger text-white"><h5 class="mb-0">Pending Approvals</h5></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6 border-end">
+                                <h6 class="text-primary fw-bold">Applicants</h6>
+                                {% for app in applicants %}
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ app.fields.get('First') }} {{ app.fields.get('Last') }}<form action="/approve_player/{{ app.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-success w-100">Approve</button></form></div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-6">
+                                <h6 class="text-info fw-bold">Guests</h6>
+                                {% for guest in guest_requests %}
+                                    <div class="p-2 border rounded mb-2 bg-light small">{{ guest.fields.get('First') }} ({{ guest.fields.get('Level') }})<br><small>Sponsor: {{ guest.fields.get('Sponsor') }}</small><form action="/approve_guest/{{ guest.id }}" method="POST" class="mt-1"><button class="btn btn-xs btn-info text-white w-100">Approve</button></form></div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if session.get('user') %}
+        <div class="card mt-2 shadow border-0 mb-5">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#dirCollapse">
+                <h5 class="mb-0">Club Directory 🔽</h5>
+            </div>
+            <div id="dirCollapse" class="collapse">
+                <div class="card-body bg-light border-bottom">
+                    <input type="text" id="directorySearch" class="form-control" placeholder="🔍 Search members by name...">
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="directoryTable">
+                        <thead class="table-light"><tr><th>Name</th><th>Level</th><th>Contact Info</th></tr></thead>
+                        <tbody>
+                            {% for p in master_list %}
+                            <tr {% if p.fields.get('Paused') %}class="table-danger"{% endif %}>
+                                <td>{{ p.fields.get('First') }} {{ p.fields.get('Last') }}</td>
+                                <td><span class="badge bg-secondary">{{ p.fields.get('Level', 'Unset') }}</span></td>
+                                <td><small class="text-muted">{{ p.fields.get('Email', 'No Email') }}<br>{{ p.fields.get('Phone', '') }}</small></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ===== TEAM MODE MODAL ===== -->
+    {% if play_mode == 'Team' and session.get('user') %}
+    <div class="modal fade" id="teamModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title fw-bold">🏆 <span id="teamModalTitle">Start a Team</span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">
+                        You are the captain of Court 1. Type a teammate's name in any empty slot,
+                        then <b>tab off the Last name field</b> to look them up.
+                        Green ✓ means confirmed. Empty slots are ignored when you save.
+                    </p>
+
+                    <!-- Court 1 -->
+                    <div class="mb-4">
+                        <h6 class="fw-bold text-success border-bottom pb-1">🎾 Court 1</h6>
+                        <div class="p-2 bg-light border rounded mb-2 d-flex align-items-center">
+                            <span class="fw-bold me-2">{{ session.user.get('first') }} {{ session.user.get('last') }}</span>
+                            <span class="badge bg-warning text-dark">You (Captain)</span>
+                        </div>
+                        <p class="small text-muted mb-1">Add up to 3 teammates. Type a name and tab off to look them up.</p>
+                        <div id="slots-court1"></div>
+                        <button type="button" class="btn btn-sm btn-outline-success mt-1"
+                                onclick="addSlot(1)" id="addBtn1">+ Add Teammate to Court 1</button>
+                    </div>
+
+                    <!-- Court 2 (hidden by default) -->
+                    <div id="court2section" style="display:none" class="mb-4">
+                        <h6 class="fw-bold text-danger border-bottom pb-1">🎾 Court 2</h6>
+                        <p class="small text-muted mb-1">Add up to 4 players for Court 2. Type a name and tab off to look them up.</p>
+                        <div id="slots-court2"></div>
+                        <button type="button" class="btn btn-sm btn-outline-danger mt-1"
+                                onclick="addSlot(2)" id="addBtn2">+ Add Player to Court 2</button>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-2 border-top pt-3">
+                        <button type="button" id="addCourtBtn" class="btn btn-sm btn-outline-secondary"
+                                onclick="addCourt()">+ Add a 2nd Court</button>
+                        <button type="button" id="removeCourtBtn" class="btn btn-sm btn-outline-danger"
+                                style="display:none" onclick="removeCourt()">− Remove Court 2</button>
+                    </div>
+
+                    <!-- Reserves -->
+                    <div class="mt-3 pt-2 border-top">
+                        <h6 class="fw-bold text-secondary">📋 Reserves <small class="text-muted fw-normal">(optional)</small></h6>
+                        <p class="small text-muted mb-2">Add extra players here. They'll be listed as reserves and moved to a court if someone drops out.</p>
+                        <div id="slots-reserve"></div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                                onclick="addReserveSlot()">+ Add Reserve Player</button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-warning fw-bold" onclick="submitTeam().catch(console.error)">
+                        💾 Save Team
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if play_mode == 'Team' and session.get('user') %}
+    <script>
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.edit-team-btn');
+        if (!btn) return;
+        const teamId = btn.dataset.teamId;
+        fetch('/team/data/' + teamId)
+            .then(r => r.json())
+            .then(data => openTeamModal(teamId, data.courts || [], data.reserves || []))
+            .catch(() => alert('Could not load team data — please try refreshing the page.'));
+    });
+    </script>
+    {% endif %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
+                var profileModal = new bootstrap.Modal(document.getElementById('profileModal'), {
+                    backdrop: 'static', keyboard: false
+                });
+                profileModal.show();
+            {% endif %}
+
+            const searchInput = document.getElementById('directorySearch');
+            if(searchInput) {
+                searchInput.addEventListener('keyup', function() {
+                    const filter = this.value.toLowerCase();
+                    const rows = document.querySelectorAll('#directoryTable tbody tr');
+                    rows.forEach(row => {
+                        row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+                    });
+                });
             }
-            cond = code_map.get(w_code, "Varied")
-            
-            end_label = end_dt.strftime('%I:%M %p').lstrip('0') if end_dt else "End"
-            weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
-        else:
-            weather_info = "Saturday forecast available soon"
+        });
 
-    except Exception as e:
-        print(f"Weather Logic Error: {e}")
+        // ===== TEAM MODAL LOGIC =====
+        let teamSlotCounts = {1: 0, 2: 0};
+        let currentTeamId = null;
 
-    applicants, guest_requests = [], []
-    if curr_user and curr_user.get('is_admin'):
-        all_apps = get_airtable_data("Applicants")
-        applicants = [a for a in all_apps if a['fields'].get('Status') == 'Pending' and not a['fields'].get('Sponsor')]
-        guest_requests = [a for a in all_apps if a['fields'].get('Status') == 'Pending' and a['fields'].get('Sponsor')]
+        function openTeamModal(teamId, courts, reserves) {
+            currentTeamId = teamId;
+            document.getElementById('teamModalTitle').textContent = teamId ? 'Edit My Team' : 'Start a Team';
 
-    show_venmo = bool(settings[0]['fields'].get('Show Venmo')) if settings else False
+            // Reset slots
+            ['slots-court1', 'slots-court2', 'slots-reserve'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = '';
+            });
+            teamSlotCounts = {1: 0, 2: 0};
+            document.getElementById('court2section').style.display = 'none';
+            document.getElementById('addCourtBtn').style.display = '';
+            document.getElementById('removeCourtBtn').style.display = 'none';
 
-    # --- Physical court assignment ---
-    import json
-    raw_map = {}
-    if settings:
-        try:
-            raw_map = json.loads(settings[0]['fields'].get('Court Map', '{}') or '{}')
-        except:
-            raw_map = {}
+            if (courts && courts.length) {
+                courts.forEach((court, ci) => {
+                    const courtNum = ci + 1;
+                    if (courtNum === 2) addCourt();
+                    court.forEach(player => {
+                        if (player['Is Captain']) return;
+                        addSlot(courtNum, player);
+                    });
+                });
+                // When editing, show all remaining empty slots so it's obvious where to add players
+                if (teamId) {
+                    const max1 = 3;  // court 1: captain + 3 others
+                    const max2 = 4;  // court 2: 4 players
+                    while (teamSlotCounts[1] < max1) addSlot(1);
+                    if (document.getElementById('court2section').style.display !== 'none') {
+                        while (teamSlotCounts[2] < max2) addSlot(2);
+                    }
+                }
+            }
+            if (reserves && reserves.length) {
+                reserves.forEach(player => addReserveSlot(player));
+            }
 
-    if play_mode == 'Open':
-        # Open: up to 6 courts of 4. Overrides keyed "1".."6"
-        n = playing_cutoff // 4
-        court_map = build_court_map(n, [4] * n, raw_map)
-        lower_court_map, upper_court_map = {}, {}
-
-    elif play_mode == 'Split':
-        # Lower = physical courts 1-3 (end court = 3), overrides keyed "L1","L2","L3"
-        # Upper = physical courts 4-6 (end court = 6), overrides keyed "U1","U2","U3"
-        nl = lower_cutoff // 4
-        nu = upper_cutoff // 4
-        lower_raw = {k[1:]: v for k, v in raw_map.items() if k.startswith('L')}
-        upper_raw = {k[1:]: v for k, v in raw_map.items() if k.startswith('U')}
-        lower_court_map = {i: int(lower_raw.get(str(i), i))       for i in range(1, nl + 1)}
-        upper_court_map = {i: int(upper_raw.get(str(i), i + 3))   for i in range(1, nu + 1)}
-        court_map = {}
-
-    else:  # Team
-        # Flatten all team-courts; auto-assign across courts 1-6; overrides keyed "T_1","T_2"…
-        team_court_sizes = [len(c) for team in team_list for c in team['courts']]
-        n_tc  = len(team_court_sizes)
-        t_raw = {k[2:]: v for k, v in raw_map.items() if k.startswith('T_')}
-        flat  = build_court_map(n_tc, team_court_sizes, t_raw)
-        seq   = 1
-        team_court_map: dict = {}
-        for team in team_list:
-            for ci in range(len(team['courts'])):
-                team_court_map[(team['team_id'], ci + 1)] = flat.get(seq, seq)
-                seq += 1
-        court_map       = team_court_map
-        lower_court_map = {}
-        upper_court_map = {}
-
-    return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster,
-                           applicants=applicants, guest_requests=guest_requests, master_list=master_recs,
-                           user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info,
-                           playing_cutoff=playing_cutoff, total_signups=total_signups, waitlist_count=waitlist_count,
-                           pending_sub_offer=pending_sub_offer, play_mode=play_mode, lower_roster=lower_roster,
-                           upper_roster=upper_roster, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff,
-                           show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
-                           court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
-                           pending_teams=pending_teams, maintenance_mode=MAINTENANCE_MODE)
-
-@app.route('/validate', methods=['POST'])
-def validate():
-    code = str(request.form.get('code', '')).strip()
-    password = request.form.get('password')
-    master = get_airtable_data("Master List")
-    user_rec = None
-    for m in master:
-        m_code = str(m['fields'].get('Code', '')).strip()
-        if m_code.endswith('.0'): m_code = m_code[:-2]
-        if m_code == code:
-            user_rec = m
-            break
-    
-    if user_rec:
-        is_admin = (password == ADMIN_PW)
-        f = user_rec['fields']
-        last_confirmed_str = f.get('Last Confirmed')
-        contact_confirmed = False
-        if last_confirmed_str:
-            try:
-                last_conf_date = dt.datetime.strptime(last_confirmed_str, "%Y-%m-%d").date()
-                if (dt.date.today() - last_conf_date).days < 180: contact_confirmed = True
-            except: pass
-        session['user'] = {
-            'code': code, 'first': f.get('First'), 'last': f.get('Last'),
-            'email': f.get('Email', ''), 'phone': f.get('Phone', ''), 'is_admin': is_admin,
-            'contact_confirmed': contact_confirmed, 'level': f.get('Level', '')
+            new bootstrap.Modal(document.getElementById('teamModal')).show();
         }
-        log_activity(f.get('First'), "Logged In")
-        return redirect(url_for('index'))
-    else:
-        log_activity(f"Failed Code Attempt: '{code}'", "Login Error")
-        send_email(ADMIN_EMAIL, "⚠️ Failed Login Attempt", f"<p>A user just attempted to log in with an invalid code: <b>{code}</b>.</p>")
-        flash("Invalid Player Code.", "danger")
-        return redirect(url_for('index'))
 
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('index'))
+        let reserveCount = 0;
 
-# === SECTION 5: PLAYER ACTIONS ===
-@app.route('/signup', methods=['POST'])
-def signup():
-    user = session.get('user')
-    if not user: return redirect(url_for('index'))
-
-    if MAINTENANCE_MODE and not user.get('is_admin'):
-        flash("Signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
-        return redirect(url_for('index'))
-
-    if not user.get('contact_confirmed') or not user.get('level'):
-        flash("Action Required: Please review your profile info to unlock signups.", "danger")
-        return redirect(url_for('index'))
-
-    m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{user['code']}'")
-    if m_recs and m_recs[0]['fields'].get('Paused'):
-        flash("🚫 Your account is paused due to strikes. Please contact Jim.", "danger")
-        return redirect(url_for('index'))
-    
-    existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
-    if existing:
-        flash("You are already signed up!", "warning")
-        return redirect(url_for('index'))
-
-    payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email'], "Level": user['level']}}
-    try:
-        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload).raise_for_status()
-        AIRTABLE_CACHE.clear()
-        log_activity(user['first'], "Signed Up")
-        flash("You've been added to the list!", "success")
-    except:
-        flash("Error saving signup to the database. Please try again or contact Jim.", "danger")
-    return redirect(url_for('index'))
-
-@app.route('/cancel', methods=['POST'])
-def cancel():
-    if not session.get('user'): return redirect(url_for('index'))
-    now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
-    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 8) or (now_mdt.weekday() == 5)
-    
-    settings = get_airtable_data("Settings")
-    play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
-    recs = get_airtable_data("Signups", sort_field="Created Time")
-    
-    my_rec = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
-    if my_rec:
-        target_list = recs
-        playing_cutoff = (min(len(target_list), 24) // 4) * 4
-        
-        if play_mode == 'Split':
-            my_level = my_rec['fields'].get('Level')
-            target_list = [r for r in recs if r['fields'].get('Level') == my_level]
-            playing_cutoff = (min(len(target_list), 12) // 4) * 4
-
-        try: idx = target_list.index(my_rec)
-        except: idx = -1
-            
-        if idx != -1:
-            is_in_complete_court = idx < playing_cutoff
-            waitlist_exists = len(target_list) > playing_cutoff
-            
-            if is_in_complete_court and is_past_deadline:
-                if waitlist_exists:
-                    promo = target_list[playing_cutoff]
-                    promo_code = promo['fields'].get('Player Code')
-                    m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{promo_code}'")
-                    promo_email = m_recs[0]['fields'].get('Email') if m_recs else None
-
-                    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS, json={"fields": {"Label": "PENDING SUB", "Sub Offer": str(promo_code)}})
-                    if promo_email:
-                        send_email(promo_email, "🎾 Sub Spot Available!", f"A spot opened up! Log in to {SITE_URL} to accept it.")
-                        flash("Drop initiated. Waitlisted player emailed.", "warning")
-                    else:
-                        flash("Drop initiated, but the waitlisted player has no email on file!", "warning")
-                else:
-                    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS, json={"fields": {"Label": "NEEDS SUB"}})
-                    flash("⚠️ NO ONE is on the waitlist for your level. You are marked NEEDS SUB.", "danger")
-                AIRTABLE_CACHE.clear()
-                return redirect(url_for('index'))
-
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS)
-        log_activity(session['user']['first'], "Cancelled")
-    
-    AIRTABLE_CACHE.clear()
-    return redirect(url_for('index'))
-
-@app.route('/accept_sub', methods=['POST'])
-def accept_sub():
-    user = session.get('user')
-    if not user or not user.get('contact_confirmed') or not user.get('level'): return redirect(url_for('index'))
-
-    recs = get_airtable_data("Signups")
-    dropper = next((r for r in recs if str(r['fields'].get('Sub Offer')) == str(user['code'])), None)
-    me = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
-    if dropper and me:
-        dropper_name = dropper['fields'].get('First')
-        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{dropper['id']}", headers=HEADERS)
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, json={"fields": {"Label": f"SUB for {dropper_name}"}})
-        AIRTABLE_CACHE.clear()
-        flash("You successfully accepted the sub spot!", "success")
-    return redirect(url_for('index'))
-
-@app.route('/update_profile', methods=['POST'])
-def update_profile():
-    user = session.get('user')
-    if not user: return redirect(url_for('index'))
-    
-    new_email, new_phone, new_level = request.form.get('email'), request.form.get('phone'), request.form.get('level')
-    if not new_email or not new_phone:
-        flash("Both Email and Phone are required.", "danger"); return redirect(url_for('index'))
-    if not user.get('level') and not new_level:
-        flash("Play Level is required.", "danger"); return redirect(url_for('index'))
-
-    master = get_airtable_data("Master List")
-    user_rec = next((m for m in master if str(m['fields'].get('Code')) == str(user['code'])), None)
-    if user_rec:
-        today_str = dt.date.today().strftime("%Y-%m-%d")
-        payload = {"fields": {"Email": new_email, "Phone": new_phone, "Last Confirmed": today_str}}
-        if not user.get('level') and new_level: payload["fields"]["Level"] = new_level
-        try: requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{user_rec['id']}", headers=HEADERS, json=payload)
-        except: pass 
-        session['user'].update({'email': new_email, 'phone': new_phone, 'contact_confirmed': True, 'level': new_level or user.get('level')})
-        session.modified = True
-        AIRTABLE_CACHE.clear()
-        flash("Profile updated! Site unlocked.", "success")
-    return redirect(url_for('index'))
-
-@app.route('/apply', methods=['POST'])
-def apply():
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('first'), "Last": request.form.get('last'), "Email": request.form.get('email'), "Status": "Pending"}})
-    flash("Application submitted! We will email you your code once approved.", "success")
-    return redirect(url_for('index'))
-
-@app.route('/request_guest', methods=['POST'])
-def request_guest():
-    user = session.get('user')
-    if not user or not user.get('contact_confirmed'): return redirect(url_for('index'))
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending", "Level": user.get('level', '')}})
-    flash("Guest request submitted to Admin. They will be placed in your play level.", "info")
-    return redirect(url_for('index'))
-
-# === TEAM MODE ROUTES ===
-
-@app.route('/team/data/<team_id>')
-def team_data(team_id):
-    """Return a team's court and reserve data as JSON for the Edit modal."""
-    user = session.get('user')
-    if not user:
-        return jsonify({'error': 'Not logged in'}), 403
-    recs = get_airtable_data("Signups")
-    team_recs = [r for r in recs if r['fields'].get('Team ID') == team_id]
-    if not team_recs:
-        return jsonify({'error': 'Not found'}), 404
-    captain = next((r for r in team_recs if r['fields'].get('Is Captain')), None)
-    app_c = int(float(captain['fields'].get('Approved Courts') or 1)) if captain else 1
-    court_players = [r['fields'] for r in team_recs if not r['fields'].get('Is Reserve')]
-    reserves      = [r['fields'] for r in team_recs if r['fields'].get('Is Reserve')]
-    court_groups  = {}
-    for p in court_players:
-        cn = int(float(p.get('Court Num') or 1))
-        court_groups.setdefault(cn, []).append(p)
-    courts = [court_groups.get(cn, []) for cn in range(1, app_c + 1)]
-    return jsonify({'courts': courts, 'reserves': reserves})
-
-
-@app.route('/team/lookup', methods=['POST'])
-def team_lookup():
-    """AJAX endpoint: fuzzy-match a player name against Master List."""
-    data = request.get_json(silent=True) or {}
-    first = data.get('first', '').strip()
-    last  = data.get('last',  '').strip()
-    if not first or not last:
-        return jsonify({'status': 'incomplete'})
-    master = get_airtable_data("Master List")
-    exact, near = find_player_matches(first, last, master)
-    if exact:
-        f = exact[0]['fields']
-        code = str(f.get('Code', '')).strip()
-        if code.endswith('.0'): code = code[:-2]
-        return jsonify({'status': 'exact', 'player': {
-            'code': code, 'first': f.get('First'), 'last': f.get('Last'),
-            'email': f.get('Email', ''), 'level': f.get('Level', '')
-        }})
-    elif near:
-        matches = []
-        for m in near[:5]:
-            c = str(m['fields'].get('Code', '')).strip()
-            if c.endswith('.0'): c = c[:-2]
-            matches.append({'code': c, 'first': m['fields'].get('First'), 'last': m['fields'].get('Last')})
-        return jsonify({'status': 'near', 'matches': matches})
-    return jsonify({'status': 'none'})
-
-
-def _process_team_slots(user, form, court_count):
-    """
-    Shared logic for team create and update.
-    Player dict keys: code, first, last, email, level, court_num (0=reserve), is_captain, is_reserve
-    """
-    master_list  = get_airtable_data("Master List")
-    confirmed    = []
-    new_accounts = []
-    errors       = []
-
-    # Captain: court 1, never a reserve
-    confirmed.append({
-        'code': user['code'], 'first': user['first'], 'last': user['last'],
-        'email': user.get('email', ''), 'level': user.get('level', ''),
-        'court_num': 1, 'is_captain': True, 'is_reserve': False
-    })
-
-    i = 0
-    while True:
-        first = form.get(f'first_{i}', None)
-        if first is None and form.get(f'last_{i}') is None:
-            break
-        first  = (first or '').strip()
-        last   = form.get(f'last_{i}',        '').strip()
-        code   = form.get(f'player_code_{i}', '').strip()
-        email  = form.get(f'email_{i}',       '').strip()
-        phone  = form.get(f'phone_{i}',       '').strip()
-        is_res = form.get(f'is_reserve_{i}',  '0') == '1'
-        i += 1
-
-        if not first and not last:
-            continue
-
-        if is_res:
-            court_num = 0
-        else:
-            court_players = sum(1 for p in confirmed if not p['is_reserve'])
-            court_num = ((court_players) // 4) + 1
-
-        if code and code != 'new':
-            # Client confirmed a match — look them up by code
-            m = next((m for m in master_list
-                      if str(m['fields'].get('Code', '')).replace('.0', '').strip() == code), None)
-            if m:
-                confirmed.append({
-                    'code': code,
-                    'first': m['fields'].get('First', first),
-                    'last':  m['fields'].get('Last',  last),
-                    'email': m['fields'].get('Email', ''),
-                    'level': m['fields'].get('Level', ''),
-                    'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
-                })
-                continue   # successfully added — skip further processing for this slot
-
-        elif first and last and not code:
-            # Client didn't confirm a code — try server-side name match as fallback
-            exact, near = find_player_matches(first, last, master_list)
-            if exact:
-                m = exact[0]
-                mc = str(m['fields'].get('Code', '')).replace('.0', '').strip()
-                confirmed.append({
-                    'code': mc, 'first': m['fields'].get('First', first),
-                    'last': m['fields'].get('Last', last), 'email': m['fields'].get('Email', ''),
-                    'level': m['fields'].get('Level', ''), 'court_num': court_num,
-                    'is_captain': False, 'is_reserve': is_res
-                })
-                continue
-            elif near and len(near) == 1:
-                # Single near match — safe to auto-confirm server-side
-                m = near[0]
-                mc = str(m['fields'].get('Code', '')).replace('.0', '').strip()
-                confirmed.append({
-                    'code': mc, 'first': m['fields'].get('First', first),
-                    'last': m['fields'].get('Last', last), 'email': m['fields'].get('Email', ''),
-                    'level': m['fields'].get('Level', ''), 'court_num': court_num,
-                    'is_captain': False, 'is_reserve': is_res
-                })
-                continue
-            elif email:
-                code = 'new'   # fall through to new-player creation below
-            elif near:
-                # Pick best near match: prefer both names partially matching over just one
-                def near_score(m):
-                    mf = m['fields'].get('First','').lower()
-                    ml = m['fields'].get('Last','').lower()
-                    return (mf == first.lower()) + (ml == last.lower())
-                best = max(near, key=near_score)
-                mc = str(best['fields'].get('Code','')).replace('.0','').strip()
-                confirmed.append({
-                    'code': mc, 'first': best['fields'].get('First', first),
-                    'last': best['fields'].get('Last', last),
-                    'email': best['fields'].get('Email', ''),
-                    'level': best['fields'].get('Level', ''),
-                    'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
-                })
-                continue
-            else:
-                errors.append(f"'{first} {last}' not found — provide their email to create an account.")
-                continue
-
-        if code == 'new' and first and last and email:
-            master_list = get_airtable_data("Master List")
-            new_code    = next_player_code(master_list)
-            try:
-                requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List",
-                    headers=HEADERS,
-                    json={"fields": {"First": first, "Last": last, "Email": email,
-                                     "Phone": phone, "Code": new_code,
-                                     "Level": user.get('level', '')},
-                          "typecast": True}, timeout=10)
-                keys = [k for k in AIRTABLE_CACHE if k.startswith('Master')]
-                for k in keys: del AIRTABLE_CACHE[k]
-                new_accounts.append({'first': first, 'last': last, 'email': email, 'code': new_code})
-                confirmed.append({
-                    'code': new_code, 'first': first, 'last': last,
-                    'email': email, 'level': user.get('level', ''),
-                    'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
-                })
-                send_email(email, "🎾 Welcome to Saturday Tennis Gang!",
-                    f"<p>Hi {first}! <b>{user['first']} {user['last']}</b> has added you to "
-                    f"the tennis roster.</p>"
-                    f"<p>Your login code is: <b>{new_code}</b></p>"
-                    f"<p>Visit <a href='{SITE_URL}'>{SITE_URL}</a> to view the roster, "
-                    f"manage your spot, or cancel if you can't make it.</p>"
-                    f"<p>See you Saturday! 🎾</p>")
-            except Exception as e:
-                errors.append(f"Could not create account for {first} {last}: {e}")
-        elif first or last:
-            errors.append(f"Skipped '{first} {last}' — no match confirmed and no email provided.")
-
-    return confirmed, new_accounts, errors
-
-
-def _send_captain_summary(user, confirmed, new_accounts, d_date, pending=False, errors=None):
-    courts_html = ""
-    court_nums = sorted(set(p['court_num'] for p in confirmed if p['court_num'] > 0))
-    for cn in court_nums:
-        cp = [p for p in confirmed if p['court_num'] == cn]
-        courts_html += f"<h4>Court {cn}</h4><ul>"
-        for p in cp:
-            tag = " <em>(Captain)</em>" if p.get('is_captain') else ""
-            courts_html += f"<li>{p['first']} {p['last']}{tag}</li>"
-        courts_html += "</ul>"
-
-    reserves = [p for p in confirmed if p.get('is_reserve')]
-    res_html = ""
-    if reserves:
-        res_html = "<h4>📋 Reserves</h4><ul>"
-        for p in reserves:
-            res_html += f"<li>{p['first']} {p['last']}</li>"
-        res_html += "</ul>"
-
-    new_html = ""
-    if new_accounts:
-        new_html = "<h4>New accounts created:</h4><ul>"
-        for np in new_accounts:
-            new_html += (f"<li><b>{np['first']} {np['last']}</b> — "
-                         f"Code: <b>{np['code']}</b> | Email: {np['email']}</li>")
-        new_html += "</ul><p><em>Each new player has been emailed their code and site link.</em></p>"
-
-    # Show any players who couldn't be added
-    errors_html = ""
-    if errors:
-        errors_html = ("<h4 style='color:red'>⚠️ Players NOT added — action needed:</h4><ul>"
-                       + "".join(f"<li>{e}</li>" for e in errors)
-                       + "</ul><p>Log back in and use <b>Edit My Team</b> to add them. "
-                         "Make sure to select their name from the lookup dropdown before saving.</p>")
-
-    status_note = ("<p><b>⏳ Your request is pending Jim's review.</b> "
-                   "Your team will appear on the roster once approved. "
-                   f"You can edit your request at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>"
-                   if pending else
-                   f"<p>Your team is live. Edit it at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>")
-
-    send_email(user['email'], f"🎾 Team {'Request' if pending else 'Summary'} for {d_date}",
-        f"<p>Hi {user['first']}! Here is your team lineup:</p>"
-        f"{courts_html}{res_html}{new_html}{errors_html}{status_note}")
-
-
-@app.route('/team/create', methods=['POST'])
-def team_create():
-    user = session.get('user')
-    if not user or not user.get('contact_confirmed') or not user.get('level'):
-        flash("Please complete your profile first.", "danger")
-        return redirect(url_for('index'))
-
-    if MAINTENANCE_MODE and not user.get('is_admin'):
-        flash("Team signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
-        return redirect(url_for('index'))
-
-    existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
-    if existing:
-        flash("You are already on the roster.", "warning")
-        return redirect(url_for('index'))
-
-    settings = get_airtable_data("Settings")
-    d_date = settings[0]['fields'].get('Target Date', 'Saturday') if settings else 'Saturday'
-
-    court_count = max(1, min(2, int(request.form.get('court_count', 1))))
-    confirmed, new_accounts, errors = _process_team_slots(user, request.form, court_count)
-
-    team_id = str(uuid.uuid4())[:8].upper()
-    for p in confirmed:
-        try:
-            fields = {
-                "First": p['first'], "Last": p['last'],
-                "Player Code": str(p['code']), "Email": p['email'],
-                "Level": p['level'], "Team ID": team_id,
-                "Is Captain": p.get('is_captain', False),
-                "Is Reserve": p.get('is_reserve', False),
-                "Court Num":  p['court_num']
+        function addReserveSlot(prefill) {
+            const idx = `res${reserveCount}`;
+            reserveCount++;
+            const div = document.createElement('div');
+            div.id = `slot-${idx}`;
+            div.className = 'mb-2 p-2 border rounded bg-white';
+            div.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <input type="text" class="form-control form-control-sm" placeholder="First"
+                           id="first-${idx}" value="${prefill ? prefill['First'] || '' : ''}">
+                    <input type="text" class="form-control form-control-sm" placeholder="Last"
+                           id="last-${idx}" value="${prefill ? prefill['Last'] || '' : ''}"
+                           onblur="lookupPlayer('${idx}')">
+                    <span class="badge bg-secondary flex-shrink-0">Reserve</span>
+                    <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0"
+                            onclick="document.getElementById('slot-${idx}').remove()">✕</button>
+                </div>
+                <div id="status-${idx}" class="mt-1 small"></div>
+                <input type="hidden" id="code-${idx}" value="${prefill ? prefill['Player Code'] || '' : ''}">
+                <input type="hidden" id="isres-${idx}" value="1">
+                <div id="extra-${idx}" class="mt-2" style="display:none">
+                    <input type="email" class="form-control form-control-sm mb-1"
+                           id="email-${idx}" placeholder="Email (required to create account)">
+                    <input type="text"  class="form-control form-control-sm"
+                           id="phone-${idx}" placeholder="Phone (optional)">
+                </div>`;
+            document.getElementById('slots-reserve').appendChild(div);
+            if (prefill && prefill['Player Code']) {
+                document.getElementById(`status-${idx}`).innerHTML =
+                    `<span class="text-success">✓ ${prefill['First']} ${prefill['Last']}</span>`;
             }
-            if p.get('is_captain'):
-                fields["Team Status"]     = "Pending"
-                fields["Requested Courts"] = court_count
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
-                headers=HEADERS, json={"fields": fields}, timeout=10)
-        except Exception as e:
-            errors.append(f"Error adding {p['first']} to roster: {e}")
-
-    _send_captain_summary(user, confirmed, new_accounts, d_date, pending=True, errors=errors)
-
-    AIRTABLE_CACHE.clear()
-    log_activity(user['first'], f"Created Team {team_id} (pending review)")
-
-    skipped = len(errors)
-    skip_note = (f" ⚠️ {skipped} player(s) couldn't be matched — check your confirmation email for details."
-                 if skipped else "")
-    flash(f"Team request submitted — {len(confirmed)} players across {court_count} court(s).{skip_note} "
-          f"Jim will review and approve before it appears on the roster.", "success" if not skipped else "warning")
-    return redirect(url_for('index'))
-
-
-@app.route('/team/update/<team_id>', methods=['POST'])
-def team_update(team_id):
-    """Captain replaces their team's non-captain players with a new submission."""
-    user = session.get('user')
-    if not user: return redirect(url_for('index'))
-
-    recs = get_airtable_data("Signups")
-    my_rec = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
-
-    if not my_rec or my_rec['fields'].get('Team ID') != team_id:
-        if not session['user'].get('is_admin'):
-            flash("Only the team captain can edit this team.", "danger")
-            return redirect(url_for('index'))
-
-    # Delete all non-captain members of this team
-    for r in recs:
-        if r['fields'].get('Team ID') == team_id and r['id'] != (my_rec['id'] if my_rec else ''):
-            try: requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS, timeout=10)
-            except: pass
-
-    settings = get_airtable_data("Settings")
-    d_date = settings[0]['fields'].get('Target Date', 'Saturday') if settings else 'Saturday'
-
-    court_count = max(1, min(2, int(request.form.get('court_count', 1))))
-    confirmed, new_accounts, errors = _process_team_slots(user, request.form, court_count)
-
-    for p in confirmed:
-        if p.get('is_captain'): continue   # captain record already exists
-        try:
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS,
-                json={"fields": {
-                    "First": p['first'], "Last": p['last'],
-                    "Player Code": str(p['code']), "Email": p['email'],
-                    "Level": p['level'], "Team ID": team_id,
-                    "Is Captain": False, "Court Num": p['court_num']
-                }}, timeout=10)
-        except Exception as e:
-            errors.append(f"Error adding {p['first']}: {e}")
-
-    _send_captain_summary(user, confirmed, new_accounts, d_date, errors=errors)
-    AIRTABLE_CACHE.clear()
-    log_activity(user['first'], f"Updated Team {team_id}")
-    skipped = len(errors)
-    skip_note = (f" ⚠️ {skipped} player(s) couldn't be matched — check your confirmation email."
-                 if skipped else "")
-    flash(f"Team updated!{skip_note}", "success" if not skipped else "warning")
-    return redirect(url_for('index'))
-
-
-@app.route('/team/remove_player/<signup_id>', methods=['POST'])
-def team_remove_player(signup_id):
-    user = session.get('user')
-    if not user: return redirect(url_for('index'))
-
-    recs = get_airtable_data("Signups")
-    my_rec     = next((r for r in recs if str(r['fields'].get('Player Code')) == str(user['code'])), None)
-    target_rec = next((r for r in recs if r['id'] == signup_id), None)
-
-    if not target_rec:
-        flash("Player record not found.", "danger")
-        return redirect(url_for('index'))
-
-    is_admin   = session['user'].get('is_admin')
-    is_captain = my_rec and my_rec['fields'].get('Is Captain')
-    same_team  = my_rec and my_rec['fields'].get('Team ID') == target_rec['fields'].get('Team ID')
-
-    if not is_admin and not (is_captain and same_team):
-        flash("Only the team captain can remove players.", "danger")
-        return redirect(url_for('index'))
-
-    if my_rec and signup_id == my_rec['id']:
-        flash("To leave the roster yourself, use Cancel Spot.", "warning")
-        return redirect(url_for('index'))
-
-    requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{signup_id}", headers=HEADERS)
-    keys = [k for k in AIRTABLE_CACHE if k.startswith('Signups')]
-    for k in keys: del AIRTABLE_CACHE[k]
-    flash("Player removed from team.", "info")
-    return redirect(url_for('index'))
-
-@app.route('/team/approve/<team_id>', methods=['POST'])
-def team_approve(team_id):
-    """Admin approves a pending team, optionally with fewer courts than requested."""
-    user = session.get('user')
-    if not user or not user.get('is_admin'):
-        return "Unauthorized", 403
-
-    approved_courts = max(1, int(request.form.get('approved_courts', 1)))
-    recs = get_airtable_data("Signups")
-    team_recs = [r for r in recs if r['fields'].get('Team ID') == team_id]
-    captain_rec = next((r for r in team_recs if r['fields'].get('Is Captain')), None)
-
-    if not captain_rec:
-        flash("Team not found.", "danger")
-        return redirect(url_for('index'))
-
-    requested_courts = int(captain_rec['fields'].get('Requested Courts') or 1)
-    cap_fields = captain_rec['fields']
-
-    # Approve the captain record
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{captain_rec['id']}",
-        headers=HEADERS, json={"fields": {
-            "Team Status":     "Approved",
-            "Approved Courts": approved_courts
-        }}, timeout=10)
-
-    # If fewer courts approved, demote excess court players to reserves
-    if approved_courts < requested_courts:
-        capacity = approved_courts * 4 - 1  # minus captain
-        non_cap = sorted(
-            [r for r in team_recs if not r['fields'].get('Is Captain') and not r['fields'].get('Is Reserve')],
-            key=lambda r: (r['fields'].get('Court Num', 1), r.get('createdTime', ''))
-        )
-        for idx, r in enumerate(non_cap):
-            if idx >= capacity:
-                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}",
-                    headers=HEADERS, json={"fields": {"Is Reserve": True, "Court Num": 0}}, timeout=10)
-
-    # Email captain
-    note = ""
-    if approved_courts < requested_courts:
-        note = (f" You requested {requested_courts} court(s), but only {approved_courts} "
-                f"could be accommodated this week. Extra players have been moved to reserves.")
-    send_email(cap_fields.get('Email', ''), "🎾 Your Team Has Been Approved!",
-        f"<p>Hi {cap_fields.get('First', '')}! Your team request for "
-        f"<b>{approved_courts} court(s)</b> has been approved.{note}</p>"
-        f"<p>Your team is now visible on the roster at "
-        f"<a href='{SITE_URL}'>{SITE_URL}</a>.</p>")
-
-    AIRTABLE_CACHE.clear()
-    log_activity("Admin", f"Approved Team {team_id} for {approved_courts} court(s)")
-    flash(f"Team '{cap_fields.get('First','')} {cap_fields.get('Last','')}' approved "
-          f"for {approved_courts} court(s).", "success")
-    return redirect(url_for('index'))
-
-# === SECTION 6: ADMIN ACTIONS ===
-@app.route('/maintenance/on')
-def maintenance_on():
-    global MAINTENANCE_MODE
-    if not session.get('user') or not session['user'].get('is_admin'):
-        return "Unauthorized", 403
-    MAINTENANCE_MODE = True
-    flash("🔒 Maintenance mode ON — only you can sign up.", "warning")
-    return redirect(url_for('index'))
-
-@app.route('/maintenance/off')
-def maintenance_off():
-    global MAINTENANCE_MODE
-    if not session.get('user') or not session['user'].get('is_admin'):
-        return "Unauthorized", 403
-    MAINTENANCE_MODE = False
-    flash("✅ Maintenance mode OFF — signups open to everyone.", "success")
-    return redirect(url_for('index'))
-
-@app.route('/admin_action', methods=['POST'])
-def admin_action():
-    global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE   # declare at top — Python 3.14 requires this
-    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    action = request.form.get('action')
-    settings = get_airtable_data("Settings")
-    if action == "labels" and settings:
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
-        flash("Session info updated!", "success")
-    elif action == "toggle_maintenance" and settings:
-        current = bool(settings[0]['fields'].get('Maintenance Mode', False))
-        new_val = not current
-        MAINTENANCE_MODE = new_val   # module-level for current session
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-            headers=HEADERS, json={"fields": {"Maintenance Mode": new_val}}, timeout=10)
-        # Update cache so page reflects change immediately
-        for key in list(AIRTABLE_CACHE.keys()):
-            if key.startswith('Settings'):
-                _, records = AIRTABLE_CACHE[key]
-                if records:
-                    records[0]['fields']['Maintenance Mode'] = new_val
-                    AIRTABLE_CACHE[key] = (time.time(), records)
-        status = "ON — only you can sign up or create teams." if new_val else "OFF — signups open to everyone."
-        flash(f"Maintenance mode {status}", "warning" if new_val else "success")
-        return redirect(url_for('index'))
-    elif action == "toggle_mode" and settings:
-        cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
-        new_mode = cycle.get(settings[0]['fields'].get('Play Mode', 'Open'), 'Open')
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
-            json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})
-        PLAY_MODE_OVERRIDE = new_mode
-        flash(f"Mode switched to {new_mode}! Court assignments reset.", "success")
-        new_mode = request.form.get('new_mode', 'Open')
-        if new_mode not in ('Open', 'Split', 'Team'):
-            new_mode = 'Open'
-
-        # PATCH Play Mode — typecast:true handles Single Select fields
-        r = requests.patch(
-            f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-            headers=HEADERS,
-            json={"fields": {"Play Mode": new_mode}, "typecast": True},
-            timeout=10)
-
-        if not r.ok:
-            flash(f"Mode switch failed — Airtable returned {r.status_code}. "
-                  f"Set Play Mode to '{new_mode}' directly in the Airtable Settings table.", "danger")
-            return redirect(url_for('index'))
-
-        # Verify Airtable actually stored the new value
-        actual_mode = r.json().get('fields', {}).get('Play Mode')
-        if actual_mode and actual_mode != new_mode:
-            flash(f"Airtable stored '{actual_mode}' instead of '{new_mode}'. "
-                  f"Add '{new_mode}' as a Select option in the Play Mode field, then try again.", "danger")
-            return redirect(url_for('index'))
-
-        # Court Map reset — best effort
-        try:
-            requests.patch(
-                f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-                headers=HEADERS, json={"fields": {"Court Map": "{}"}}, timeout=10)
-        except: pass
-
-        # Three-layer persistence so mode survives cache expiry AND process restarts:
-        # 1. Update cache with exactly what Airtable confirmed — not our assumption
-        confirmed_fields = r.json().get('fields', {})
-        for key in list(AIRTABLE_CACHE.keys()):
-            if key.startswith('Settings'):
-                _, records = AIRTABLE_CACHE[key]
-                if records:
-                    records[0]['fields'].update(confirmed_fields)
-                    AIRTABLE_CACHE[key] = (time.time(), records)   # reset TTL from now
-
-        # 2. Module-level var — survives cache expiry for the lifetime of this process
-        PLAY_MODE_OVERRIDE = new_mode
-
-        # 3. Session — covers the immediate redirect
-        session['forced_play_mode'] = new_mode
-        session.modified = True
-
-        flash(f"Switched to {new_mode} Mode.", "success")
-        return redirect(url_for('index'))
-    elif action == "assign_court" and settings:
-        import json
-        logical  = request.form.get('logical', '').strip()
-        physical = request.form.get('physical', '').strip()
-        prefix   = request.form.get('prefix', '')   # '', 'L', 'U', 'T_'
-        if logical and physical:
-            try:
-                raw = json.loads(settings[0]['fields'].get('Court Map', '{}') or '{}')
-                raw[prefix + logical] = int(physical)
-                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-                    headers=HEADERS, json={"fields": {"Court Map": json.dumps(raw)}})
-            except Exception as e:
-                flash(f"Court assignment error: {e}", "danger")
-    elif action == "reset_courts" and settings:
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-            headers=HEADERS, json={"fields": {"Court Map": "{}"}})
-        flash("Court assignments reset to auto.", "success")
-    elif action == "toggle_venmo" and settings:
-        current = bool(settings[0]['fields'].get('Show Venmo'))
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Show Venmo": not current}})
-        flash(f"Venmo card {'hidden' if current else 'shown'}.", "success")
-    elif action == "reset_roster":
-        signups = get_airtable_data("Signups", sort_field="Created Time")
-        _archive_and_clear_signups(settings, signups)
-        log_activity("Admin", "Manual roster reset — signups archived, no emails sent")
-        flash("Roster cleared and archived. Signup emails will go out via the Monday cron at 8:15 AM.", "success")
-        return redirect(url_for('index'))
-    AIRTABLE_CACHE.clear()
-    return redirect(url_for('index'))
-
-@app.route('/move_player/<signup_id>', methods=['POST'])
-def move_player(signup_id):
-    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    new_level = '4.0/4.5' if request.form.get('current_level') == '3.0/3.5' else '3.0/3.5'
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{signup_id}", headers=HEADERS, json={"fields": {"Level": new_level}})
-    AIRTABLE_CACHE.clear()
-    flash("Player moved successfully to balance courts!", "success")
-    return redirect(url_for('index'))
-
-@app.route('/info_blast', methods=['POST'])
-def info_blast():
-    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    msg, group = request.form.get('message'), request.form.get('target_group')
-    emails = [r['fields'].get('Email') for r in get_airtable_data("Signups" if group == "roster" else "Master List") if r['fields'].get('Email')]
-    send_email(emails, "🎾 Tennis Gang Announcement", f"<p>{msg}</p>", is_multiple=True)
-    flash("Announcement sent!", "success")
-    return redirect(url_for('index'))
-
-@app.route('/approve_player/<id>', methods=['POST'])
-def approve_player(id):
-    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{id}", headers=HEADERS).json()
-    f = res.get('fields', {})
-    m_list = get_airtable_data("Master List")
-    highest_code = max([int(str(m['fields'].get('Code')).strip()) for m in m_list if str(m['fields'].get('Code')).isdigit() and 1000 < int(str(m['fields'].get('Code')).strip()) < 9000], default=1000)
-    new_code = str(highest_code + 1)
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List", headers=HEADERS, json={"fields": {"First": f.get('First'), "Last": f.get('Last'), "Email": f.get('Email'), "Code": new_code}, "typecast": True})
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{id}", headers=HEADERS, json={"fields": {"Status": "Approved", "Assigned Code": new_code}, "typecast": True})
-    send_email(f.get('Email'), "🎾 Welcome to the Gang!", f"<p>Approved. Login code: <b>{new_code}</b></p>")
-    flash(f"Approved with Code {new_code}.", "success")
-    AIRTABLE_CACHE.clear()
-    return redirect(url_for('index'))
-
-@app.route('/approve_guest/<app_id>', methods=['POST'])
-def approve_guest(app_id):
-    if not session.get('user', {}).get('is_admin'): return redirect(url_for('index'))
-    res = requests.get(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS).json()
-    f = res.get('fields', {})
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json={"fields": {"First": f.get('First'), "Last": f.get('Last'), "Player Code": "GUEST", "Label": f"GUEST of {f.get('Sponsor')}", "Level": f.get('Level')}})
-    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
-    flash(f"Guest added to roster!", "success")
-    AIRTABLE_CACHE.clear()
-    return redirect(url_for('index'))
-
-@app.route('/attendance/<code_str>', methods=['POST'])
-def attendance(code_str):
-    if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
-    status = request.form.get('status')
-    strike_inc = 1 if status == 'Late' else 2 if status == 'No Show' else 0
-    m_recs = get_airtable_data("Master List", filter_formula=f"{{Code}}='{code_str}'")
-    
-    player_level = ""
-    if m_recs:
-        player_level = m_recs[0]['fields'].get('Level', '')
-        if strike_inc > 0:
-            new_strikes = m_recs[0]['fields'].get('Strikes', 0) + strike_inc
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{m_recs[0]['id']}", headers=HEADERS, json={"fields": {"Strikes": new_strikes, "Paused": (new_strikes >= 3)}})
-            
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"Player Code": str(code_str), "Attendance": status, "Date": dt.datetime.now().strftime("%Y-%m-%d"), "Level": player_level}, "typecast": True})
-    flash(f"Updated attendance for {code_str}", "info")
-    AIRTABLE_CACHE.clear()
-    return redirect(url_for('index'))
-
-@app.route('/reorder', methods=['POST'])
-def reorder():
-    """Admin-only: move a signup record up or down in the manual roster order."""
-    if not session.get('user') or not session['user'].get('is_admin'):
-        return "Unauthorized", 403
-
-    record_id = request.form.get('record_id')
-    direction = request.form.get('direction')  # 'up' or 'down'
-
-    # Use the same sort used by index() so positions match what admin sees
-    signups = sorted(get_airtable_data("Signups"), key=sort_key)
-    ids = [r['id'] for r in signups]
-
-    if record_id not in ids:
-        flash("Record not found — try refreshing.", "danger")
-        return redirect(url_for('index'))
-
-    idx = ids.index(record_id)
-    if direction == 'up' and idx == 0:
-        return redirect(url_for('index'))   # already at top
-    if direction == 'down' and idx == len(ids) - 1:
-        return redirect(url_for('index'))   # already at bottom
-
-    swap_idx = idx - 1 if direction == 'up' else idx + 1
-
-    # Assign 1-based Manual Order values to the two swapped records
-    new_order_this = swap_idx + 1
-    new_order_swap = idx + 1
-
-    base_url = f"https://api.airtable.com/v0/{BASE_ID}/Signups"
-    try:
-        requests.patch(f"{base_url}/{signups[idx]['id']}", headers=HEADERS,
-                       json={"fields": {"Manual Order": new_order_this}}, timeout=10)
-        requests.patch(f"{base_url}/{signups[swap_idx]['id']}", headers=HEADERS,
-                       json={"fields": {"Manual Order": new_order_swap}}, timeout=10)
-    except Exception as e:
-        flash(f"Reorder failed: {e}", "danger")
-        return redirect(url_for('index'))
-
-    # Bust Signups cache so the next page load shows the updated order
-    keys_to_clear = [k for k in AIRTABLE_CACHE if k.startswith('Signups')]
-    for k in keys_to_clear:
-        del AIRTABLE_CACHE[k]
-
-    return redirect(url_for('index'))
-
-def get_saturday_weather(d_start='9:00 AM'):
-    """Fetch Saturday's weather from Open-Meteo (free, no API key).
-    Returns a short HTML string suitable for email, or empty string on failure."""
-    try:
-        lat, lon = "39.9936", "-105.0897"
-        url = (f"https://api.open-meteo.com/v1/forecast"
-               f"?latitude={lat}&longitude={lon}"
-               f"&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-               f"&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=16")
-        data = requests.get(url, timeout=10).json()
-
-        today = dt.date.today()
-        days_ahead = (5 - today.weekday()) % 7 or 7   # next Saturday
-        target = today + dt.timedelta(days=days_ahead)
-        target_iso = target.isoformat()
-
-        dates = data.get('daily', {}).get('time', [])
-        if target_iso not in dates:
-            return ""
-
-        idx      = dates.index(target_iso)
-        hi       = int(data['daily']['temperature_2m_max'][idx])
-        lo       = int(data['daily']['temperature_2m_min'][idx])
-        precip   = int(data['daily'].get('precipitation_probability_max', [0]*16)[idx] or 0)
-        wcode    = data['daily']['weathercode'][idx]
-        code_map = {
-            0: "☀️ Clear", 1: "🌤 Mostly Clear", 2: "⛅ Partly Cloudy", 3: "☁️ Overcast",
-            45: "🌫 Fog", 48: "🌫 Fog",
-            51: "🌦 Drizzle", 53: "🌦 Drizzle", 55: "🌧 Drizzle",
-            61: "🌧 Rain", 63: "🌧 Rain", 65: "🌧 Heavy Rain",
-            71: "🌨 Snow", 73: "🌨 Snow", 75: "❄️ Heavy Snow",
-            95: "⛈ Thunderstorm"
         }
-        cond = code_map.get(wcode, "🌡 Varied")
-        rain_note = f", {precip}% chance of rain" if precip >= 20 else ""
-        return (f"<p>📅 <b>Saturday forecast</b> ({target.strftime('%b %d')}): "
-                f"{cond} | High {hi}°F, Low {lo}°F{rain_note}. "
-                f"<small><i>(via Open-Meteo, updated daily)</i></small></p>")
-    except:
-        return ""
 
-# === SECTION 7: CRON / AUTOMATION ===
+        function addSlot(court, prefill) {
+            const maxSlots = court === 1 ? 3 : 4;
+            if (teamSlotCounts[court] >= maxSlots) {
+                alert(`Court ${court} is full (max ${maxSlots} teammates).`);
+                return;
+            }
+            const n = teamSlotCounts[court];
+            teamSlotCounts[court]++;
+            const idx = `c${court}s${n}`;
 
-def _archive_and_clear_signups(settings, signups):
-    """Archive all current signups then delete them from the Signups table.
-    Called by both cron_monday (with emails) and the manual admin reset (no emails)."""
-    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
-    for r in signups:
-        try:
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS,
-                json={"fields": {
-                    "First":       r['fields'].get('First'),
-                    "Last":        r['fields'].get('Last'),
-                    "Player Code": str(r['fields'].get('Player Code', '')),
-                    "Date":        d_date,
-                    "Attendance":  r['fields'].get('Label', 'Signed Up'),
-                    "Level":       r['fields'].get('Level', '')
-                }, "typecast": True})
-        except: pass
-        try:
-            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-        except: pass
-    AIRTABLE_CACHE.clear()
+            const div = document.createElement('div');
+            div.id = `slot-${idx}`;
+            div.className = 'mb-2 p-2 border rounded bg-white';
+            div.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <input type="text" class="form-control form-control-sm" placeholder="First"
+                           id="first-${idx}" value="${prefill ? prefill['First'] || '' : ''}">
+                    <input type="text" class="form-control form-control-sm" placeholder="Last"
+                           id="last-${idx}"  value="${prefill ? prefill['Last']  || '' : ''}"
+                           onblur="lookupPlayer('${idx}')">
+                    <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0"
+                            onclick="removeSlot('${idx}', ${court})">✕</button>
+                </div>
+                <div id="status-${idx}" class="mt-1 small"></div>
+                <input type="hidden" id="code-${idx}" value="${prefill ? prefill['Player Code'] || '' : ''}">
+                <div id="extra-${idx}" class="mt-2" style="display:none">
+                    <input type="email" class="form-control form-control-sm mb-1"
+                           id="email-${idx}" placeholder="Email (required to create account)">
+                    <input type="text"  class="form-control form-control-sm"
+                           id="phone-${idx}" placeholder="Phone (optional)">
+                </div>`;
+            document.getElementById(`slots-court${court}`).appendChild(div);
 
-# Helper for friendly numbers (1st, 2nd, 3rd)
-def get_ordinal(n):
-    if 11 <= (n % 100) <= 13: return str(n) + 'th'
-    return str(n) + {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+            // If pre-filling with existing player, mark as confirmed immediately
+            if (prefill && prefill['Player Code']) {
+                document.getElementById(`status-${idx}`).innerHTML =
+                    `<span class="text-success">✓ ${prefill['First']} ${prefill['Last']}</span>`;
+            }
+        }
 
-@app.route('/cron/monday')
-def cron_monday():
-    settings = get_airtable_data("Settings")
-    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
-    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
-    play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
-    
-    mode_descriptions = {
-        'Open':  "This week we are in <b>Open</b> mode — sign up individually, first come first served across all available courts.",
-        'Split': "This week we are in <b>Split</b> mode, with 3 courts reserved for each skill group. "
-                 "<br><i>(I may shift numbers on Friday to a 4/2 arrangement if sign-ups support it.)</i>",
-        'Team':  "This week we are in <b>Team</b> mode — captains sign up a full court (4 players) and can list reserves. "
-                 "Log in, click <b>Start a Team</b>, and submit your court request. "
-                 "I'll review and approve court assignments before the roster goes live.<br><br>"
-                 "<b>After submitting your team:</b> you should receive a confirmation email within a few minutes. "
-                 "If you don't, something may have gone wrong — contact Jim rather than submitting again.",
-    }
-    mode_explanation = mode_descriptions.get(play_mode, mode_descriptions['Open'])
+        function removeSlot(idx, court) {
+            const el = document.getElementById(`slot-${idx}`);
+            if (el) el.remove();
+            teamSlotCounts[court] = Math.max(0, teamSlotCounts[court] - 1);
+        }
 
-    # Week Note: if set in Settings, prepend it (for special introductions like Team Mode launch)
-    week_note = settings[0]['fields'].get('Week Note', '').strip() if settings else ''
-    if week_note:
-        mode_explanation = f"{week_note}<br><br>{mode_explanation}"
-        # Clear the note so it doesn't repeat next week
-        try:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-                headers=HEADERS, json={"fields": {"Week Note": ""}})
-        except: pass
+        async function lookupPlayer(idx) {
+            const first = (document.getElementById(`first-${idx}`)?.value || '').trim();
+            const last  = (document.getElementById(`last-${idx}`)?.value  || '').trim();
+            if (!first || !last) return;
 
-    signups = get_airtable_data("Signups", sort_field="Created Time")
-    
-    # 1. Calculate the number of each rating that actually PLAYED (ignores waitlist)
-    played_levels = {}
-    if play_mode == 'Split':
-        lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
-        upper = [s for s in signups if s['fields'].get('Level') == '4.0/4.5']
-        l_cutoff = (min(len(lower), 12) // 4) * 4
-        u_cutoff = (min(len(upper), 12) // 4) * 4
-        playing_recs = lower[:l_cutoff] + upper[:u_cutoff]
-    else:
-        playing_cutoff = (min(len(signups), 24) // 4) * 4
-        playing_recs = signups[:playing_cutoff]
+            const statusDiv = document.getElementById(`status-${idx}`);
+            statusDiv.innerHTML = '<span class="text-muted fst-italic">Looking up…</span>';
 
-    for r in playing_recs:
-        lvl = r['fields'].get('Level', 'Unrated')
-        played_levels[lvl] = played_levels.get(lvl, 0) + 1
+            try {
+                const res  = await fetch('/team/lookup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({first, last})
+                });
+                const data = await res.json();
 
-    # 2. Log stats and Email Admin
-    stats_msg = " | ".join([f"{k}: {v} players" for k, v in played_levels.items()])
-    if stats_msg:
-        log_activity("Weekly Play Stats", f"Played on {d_date} -> {stats_msg}")
-        send_email(ADMIN_EMAIL, f"📊 Weekly Stats for {d_date}", f"<p>Here is the breakdown of ratings that made the cutoff and played this past Saturday:</p><h3>{stats_msg}</h3>")
+                if (data.status === 'exact') {
+                    document.getElementById(`code-${idx}`).value = data.player.code;
+                    document.getElementById(`extra-${idx}`).style.display = 'none';
+                    statusDiv.innerHTML =
+                        `<span class="text-success">✓ Found: <b>${data.player.first} ${data.player.last}</b></span>`;
 
-    # 3. Archive everyone (with their Level) and clear signups
-    _archive_and_clear_signups(settings, signups)
-            
-    # 4. Open signups for the new week (include Saturday weather forecast)
-    try:
-        weather_html = get_saturday_weather(d_start)
-        emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        send_email(emails, f"🎾 Signups OPEN for {d_date}!",
-            f"<h3>Signups are open!</h3>"
-            f"<p><b>Time:</b> {d_start}</p>"
-            f"{weather_html}"
-            f"<p>{mode_explanation}</p>"
-            f"<p><a href='{SITE_URL}'>Claim your spot!</a></p>",
-            is_multiple=True)
-    except: pass
-        
-    AIRTABLE_CACHE.clear()
-    return "Monday reset, stats calculated, and emails sent successfully.", 200
+                } else if (data.status === 'near') {
+                    const opts = data.matches.map(m =>
+                        `<option value="${m.code}">${m.first} ${m.last}</option>`
+                    ).join('');
+                    statusDiv.innerHTML = `
+                        <span class="text-warning">⚠️ Did you mean one of these?</span>
+                        <select class="form-select form-select-sm mt-1"
+                                onchange="selectNearMatch('${idx}', this)">
+                            <option value="">— select —</option>
+                            ${opts}
+                            <option value="new">Not listed — new player</option>
+                        </select>`;
 
-@app.route('/cron/friday')
-def cron_friday():
-    settings = get_airtable_data("Settings")
-    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
-    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
-    play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
-    
-    signups = get_airtable_data("Signups", sort_field="Created Time")
-    master_list = get_airtable_data("Master List")
-    all_emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
-    
-    if play_mode == 'Open':
-        total = len(signups)
-        playing_cutoff = (min(total, 24) // 4) * 4
-        playing_recs = signups[:playing_cutoff]
-        waitlist_recs = signups[playing_cutoff:]
-        
-        C = total // 4
-        W = total - playing_cutoff 
-        needed = 4 - (total % 4) if total % 4 != 0 else 4
-        
-        big_picture = f"We have {W} on the waitlist, so if {needed} more join us, we will add a {get_ordinal(C + 1)} court!"
-        
-        # 1. Email Playing
-        playing_emails = [r['fields'].get('Email') for r in playing_recs if r['fields'].get('Email')]
-        if playing_emails:
-            send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-            
-        # 2. Email Waitlist Individually
-        for idx, r in enumerate(waitlist_recs):
-            em = r['fields'].get('Email')
-            if em:
-                send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(waitlist_recs)}</b> on the Open waitlist.</p><p>Keep an eye out for sub requests! {C} courts are currently reserved.</p>")
-                
-        # 3. Email Big Picture Blast
-        send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
+                } else {
+                    document.getElementById(`code-${idx}`).value = 'new';
+                    document.getElementById(`extra-${idx}`).style.display = 'block';
+                    statusDiv.innerHTML =
+                        `<span class="text-danger">✗ Not found — enter email below to create account</span>`;
+                }
+            } catch(e) {
+                statusDiv.innerHTML = '<span class="text-danger">Lookup failed — check name and try again</span>';
+            }
+        }
 
-    else: 
-        # SPLIT MODE LOGIC
-        lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
-        upper = [s for s in signups if s['fields'].get('Level') == '4.0/4.5']
-        
-        l_cutoff = (min(len(lower), 12) // 4) * 4
-        u_cutoff = (min(len(upper), 12) // 4) * 4
-        
-        l_play, l_wait = lower[:l_cutoff], lower[l_cutoff:]
-        u_play, u_wait = upper[:u_cutoff], upper[u_cutoff:]
-        
-        l_C, u_C = len(lower) // 4, len(upper) // 4
-        l_needed = 4 - (len(lower) % 4) if len(lower) % 4 != 0 else 4
-        u_needed = 4 - (len(upper) % 4) if len(upper) % 4 != 0 else 4
-        
-        l_status = f"we are full on 3.0/3.5 with {len(l_wait)} on the waitlist, so if {l_needed} more join, we will add a {get_ordinal(l_C + 1)} court for 3.0/3.5."
-        if len(l_wait) == 0 and len(lower) < 12:
-            l_status = f"we have {len(lower)} players for 3.0/3.5. If {l_needed} more join, we will add a {get_ordinal(l_C + 1)} court."
-            
-        u_status = f"we have {len(u_wait)} on the 4.0/4.5 waitlist, so if {u_needed} more join, we will add a {get_ordinal(u_C + 1)} court."
-        if len(u_wait) == 0 and len(upper) < 12:
-            u_status = f"we have {len(upper)} players for 4.0/4.5. If {u_needed} more join, we will add a {get_ordinal(u_C + 1)} court."
-        
-        big_picture = f"This week we are in Split mode. For the big picture: {l_status} And {u_status} <i>(We may shift to a 4 court / 2 court arrangement if the numbers support it!)</i>"
+        function selectNearMatch(idx, sel) {
+            const val = sel.value;
+            if (!val) return;
+            if (val === 'new') {
+                document.getElementById(`code-${idx}`).value = 'new';
+                document.getElementById(`extra-${idx}`).style.display = 'block';
+                sel.parentElement.querySelector('select')?.remove();
+                document.getElementById(`status-${idx}`).innerHTML +=
+                    ' <span class="text-danger">New player — fill in email below</span>';
+            } else {
+                const label = sel.options[sel.selectedIndex].text;
+                document.getElementById(`code-${idx}`).value = val;
+                document.getElementById(`extra-${idx}`).style.display = 'none';
+                document.getElementById(`status-${idx}`).innerHTML =
+                    `<span class="text-success">✓ Confirmed: <b>${label}</b></span>`;
+            }
+        }
 
-        # 1. Email Playing
-        playing_emails = [r['fields'].get('Email') for r in (l_play + u_play) if r['fields'].get('Email')]
-        if playing_emails:
-            send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-            
-        # 2. Email Waitlists Individually
-        for idx, r in enumerate(l_wait):
-            em = r['fields'].get('Email')
-            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(l_wait)}</b> on the 3.0/3.5 waitlist.</p><p>Keep an eye out for sub requests! {l_cutoff//4} courts are currently reserved for your level.</p>")
-        for idx, r in enumerate(u_wait):
-            em = r['fields'].get('Email')
-            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_cutoff//4} courts are currently reserved for your level.</p>")
+        function addCourt() {
+            document.getElementById('court2section').style.display = '';
+            document.getElementById('addCourtBtn').style.display = 'none';
+            document.getElementById('removeCourtBtn').style.display = '';
+            if (teamSlotCounts[2] === 0) addSlot(2);   // open first slot automatically
+        }
 
-        # 3. Email Big Picture Blast
-        send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend:</p><p><b>{big_picture}</b></p><p>If you can play, jump in and help us fill out the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
-        
-    return "Friday reminder emails sent successfully.", 200
+        function removeCourt() {
+            if (!confirm('Remove Court 2 and all its players from this submission?')) return;
+            document.getElementById('slots-court2').innerHTML = '';
+            teamSlotCounts[2] = 0;
+            document.getElementById('court2section').style.display = 'none';
+            document.getElementById('addCourtBtn').style.display = '';
+            document.getElementById('removeCourtBtn').style.display = 'none';
+        }
 
-if __name__ == '__main__':
-    app.run(debug=True)
+        async function submitTeam() {
+            // Await any slot that has first+last but no code yet (lookup not yet triggered)
+            const pending = [];
+            document.querySelectorAll('[id^="last-"]').forEach(el => {
+                const sid   = el.id.replace('last-', '');
+                const code  = (document.getElementById(`code-${sid}`)?.value || '').trim();
+                const first = (document.getElementById(`first-${sid}`)?.value || '').trim();
+                const last  = (el.value || '').trim();
+                if (first && last && !code) pending.push(lookupPlayer(sid));
+            });
+            if (pending.length) {
+                await Promise.all(pending);
+                await new Promise(r => setTimeout(r, 150));  // let DOM update after lookups
+            }
+
+            let errors = [];
+            let slotIdx = 0;
+            const hiddenForm = document.createElement('form');
+            hiddenForm.method = 'POST';
+            hiddenForm.action = currentTeamId ? `/team/update/${currentTeamId}` : '/team/create';
+
+            const courtCount = document.getElementById('court2section').style.display === 'none' ? 1 : 2;
+            hiddenForm.appendChild(_input('court_count', courtCount));
+
+            // Collect court slots then reserve slots
+            const allContainers = [
+                {id: 'slots-court1', isRes: false},
+                {id: 'slots-court2', isRes: false},
+                {id: 'slots-reserve', isRes: true}
+            ];
+
+            allContainers.forEach(({id, isRes}) => {
+                const container = document.getElementById(id);
+                if (!container) return;
+                container.querySelectorAll('[id^="slot-"]').forEach(slotDiv => {
+                    const sid   = slotDiv.id.replace('slot-', '');
+                    const first = (document.getElementById(`first-${sid}`)?.value || '').trim();
+                    const last  = (document.getElementById(`last-${sid}`)?.value  || '').trim();
+                    const code  = (document.getElementById(`code-${sid}`)?.value  || '').trim();
+                    const email = (document.getElementById(`email-${sid}`)?.value || '').trim();
+                    const phone = (document.getElementById(`phone-${sid}`)?.value || '').trim();
+                    const res   = (document.getElementById(`isres-${sid}`)?.value || '0');
+
+                    if (!first && !last) return;
+
+                    if (!code) {
+                        errors.push(`"${first} ${last}" hasn't been looked up yet — click the Last name field.`);
+                    } else if (code === 'new' && !email) {
+                        errors.push(`"${first} ${last}" is new — email is required.`);
+                    }
+
+                    hiddenForm.appendChild(_input(`first_${slotIdx}`,        first));
+                    hiddenForm.appendChild(_input(`last_${slotIdx}`,         last));
+                    hiddenForm.appendChild(_input(`player_code_${slotIdx}`,  code));
+                    hiddenForm.appendChild(_input(`email_${slotIdx}`,        email));
+                    hiddenForm.appendChild(_input(`phone_${slotIdx}`,        phone));
+                    hiddenForm.appendChild(_input(`is_reserve_${slotIdx}`,   res === '1' || isRes ? '1' : '0'));
+                    slotIdx++;
+                });
+            });
+
+            if (errors.length) { alert('Please fix:\n\n' + errors.join('\n')); return; }
+            if (slotIdx === 0 && !currentTeamId) { alert('Add at least one teammate before saving.'); return; }
+
+            document.body.appendChild(hiddenForm);
+            hiddenForm.submit();
+        }
+
+        function _input(name, value) {
+            const el = document.createElement('input');
+            el.type = 'hidden'; el.name = name; el.value = value;
+            return el;
+        }
+    </script>
+</body>
+</html>
