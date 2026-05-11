@@ -297,11 +297,14 @@ def index():
             app_c    = int(captain.get('Approved Courts')  or req_c) if captain else req_c
             reserves = [p for p in players if p.get('Is Reserve')]
             courts_p = [p for p in players if not p.get('Is Reserve')]
-            cap_list = [captain] if captain else []
-            others   = [p for p in courts_p if p is not captain]
-            ordered  = cap_list + others
-            courts   = [ordered[i:i+4] for i in range(0, len(ordered), 4)]
-            # Pad to approved_courts so courts with missing players still show as TBD
+            reserves = [p for p in players if p.get('Is Reserve')]
+            # Group by stored Court Num field (not sequential position)
+            court_groups = {}
+            for p in courts_p:
+                cn = int(float(p.get('Court Num') or 1))
+                court_groups.setdefault(cn, []).append(p)
+            courts = [court_groups.get(cn, []) for cn in range(1, app_c + 1)]
+            # Always show approved_courts courts, padding with empty lists for TBD
             while len(courts) < app_c:
                 courts.append([])
             team_data = {
@@ -769,7 +772,7 @@ def _process_team_slots(user, form, court_count):
     return confirmed, new_accounts, errors
 
 
-def _send_captain_summary(user, confirmed, new_accounts, d_date, pending=False):
+def _send_captain_summary(user, confirmed, new_accounts, d_date, pending=False, errors=None):
     courts_html = ""
     court_nums = sorted(set(p['court_num'] for p in confirmed if p['court_num'] > 0))
     for cn in court_nums:
@@ -796,6 +799,14 @@ def _send_captain_summary(user, confirmed, new_accounts, d_date, pending=False):
                          f"Code: <b>{np['code']}</b> | Email: {np['email']}</li>")
         new_html += "</ul><p><em>Each new player has been emailed their code and site link.</em></p>"
 
+    # Show any players who couldn't be added
+    errors_html = ""
+    if errors:
+        errors_html = ("<h4 style='color:red'>⚠️ Players NOT added — action needed:</h4><ul>"
+                       + "".join(f"<li>{e}</li>" for e in errors)
+                       + "</ul><p>Log back in and use <b>Edit My Team</b> to add them. "
+                         "Make sure to select their name from the lookup dropdown before saving.</p>")
+
     status_note = ("<p><b>⏳ Your request is pending Jim's review.</b> "
                    "Your team will appear on the roster once approved. "
                    f"You can edit your request at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>"
@@ -804,7 +815,7 @@ def _send_captain_summary(user, confirmed, new_accounts, d_date, pending=False):
 
     send_email(user['email'], f"🎾 Team {'Request' if pending else 'Summary'} for {d_date}",
         f"<p>Hi {user['first']}! Here is your team lineup:</p>"
-        f"{courts_html}{res_html}{new_html}{status_note}")
+        f"{courts_html}{res_html}{new_html}{errors_html}{status_note}")
 
 
 @app.route('/team/create', methods=['POST'])
@@ -848,17 +859,16 @@ def team_create():
         except Exception as e:
             errors.append(f"Error adding {p['first']} to roster: {e}")
 
-    _send_captain_summary(user, confirmed, new_accounts, d_date, pending=True)
+    _send_captain_summary(user, confirmed, new_accounts, d_date, pending=True, errors=errors)
 
     AIRTABLE_CACHE.clear()
     log_activity(user['first'], f"Created Team {team_id} (pending review)")
 
-    for e in errors: flash(e, "warning")
-    n_courts  = sum(1 for p in confirmed if not p['is_reserve'] and p['court_num'] > 0)
-    n_res     = sum(1 for p in confirmed if p['is_reserve'])
-    res_note  = f" + {n_res} reserve(s)" if n_res else ""
-    flash(f"Team request submitted — {len(confirmed)} players across {court_count} court(s){res_note}. "
-          f"Jim will review and approve before it appears on the roster.", "success")
+    skipped = len(errors)
+    skip_note = (f" ⚠️ {skipped} player(s) couldn't be matched — check your confirmation email for details."
+                 if skipped else "")
+    flash(f"Team request submitted — {len(confirmed)} players across {court_count} court(s).{skip_note} "
+          f"Jim will review and approve before it appears on the roster.", "success" if not skipped else "warning")
     return redirect(url_for('index'))
 
 
@@ -901,12 +911,13 @@ def team_update(team_id):
         except Exception as e:
             errors.append(f"Error adding {p['first']}: {e}")
 
-    _send_captain_summary(user, confirmed, new_accounts, d_date)
-
+    _send_captain_summary(user, confirmed, new_accounts, d_date, errors=errors)
     AIRTABLE_CACHE.clear()
     log_activity(user['first'], f"Updated Team {team_id}")
-    for e in errors: flash(e, "warning")
-    flash("Team updated! Summary emailed to you.", "success")
+    skipped = len(errors)
+    skip_note = (f" ⚠️ {skipped} player(s) couldn't be matched — check your confirmation email."
+                 if skipped else "")
+    flash(f"Team updated!{skip_note}", "success" if not skipped else "warning")
     return redirect(url_for('index'))
 
 
