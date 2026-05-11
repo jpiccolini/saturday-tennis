@@ -945,18 +945,25 @@ def admin_action():
         new_mode = request.form.get('new_mode', 'Open')
         if new_mode not in ('Open', 'Split', 'Team'):
             new_mode = 'Open'
-        # PATCH Play Mode first (critical) — separate call so Court Map can never block it
-        r = requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+        # PATCH Play Mode (critical path, separate from Court Map)
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
             headers=HEADERS, json={"fields": {"Play Mode": new_mode}}, timeout=10)
-        try:  # Court Map reset is best-effort
+        try:
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
                 headers=HEADERS, json={"fields": {"Court Map": "{}"}}, timeout=10)
         except: pass
-        # Store in session so the redirect sees the new mode immediately,
-        # regardless of Airtable propagation timing
+        # Directly update every Settings cache entry so all reads for the next 300s
+        # see the new mode — avoids the Airtable propagation race condition entirely
+        for key in list(AIRTABLE_CACHE.keys()):
+            if key.startswith('Settings'):
+                ts, records = AIRTABLE_CACHE[key]
+                if records:
+                    records[0]['fields']['Play Mode'] = new_mode
+                    records[0]['fields']['Court Map'] = '{}'
+                    AIRTABLE_CACHE[key] = (ts, records)
+        # Session fallback for the immediate redirect (belt AND suspenders)
         session['forced_play_mode'] = new_mode
         session.modified = True
-        AIRTABLE_CACHE.clear()
         flash(f"Switched to {new_mode} Mode.", "success")
         return redirect(url_for('index'))
     elif action == "assign_court" and settings:
