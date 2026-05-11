@@ -940,6 +940,24 @@ def team_approve(team_id):
     return redirect(url_for('index'))
 
 # === SECTION 6: ADMIN ACTIONS ===
+@app.route('/maintenance/on')
+def maintenance_on():
+    global MAINTENANCE_MODE
+    if not session.get('user') or not session['user'].get('is_admin'):
+        return "Unauthorized", 403
+    MAINTENANCE_MODE = True
+    flash("🔒 Maintenance mode ON — only you can sign up.", "warning")
+    return redirect(url_for('index'))
+
+@app.route('/maintenance/off')
+def maintenance_off():
+    global MAINTENANCE_MODE
+    if not session.get('user') or not session['user'].get('is_admin'):
+        return "Unauthorized", 403
+    MAINTENANCE_MODE = False
+    flash("✅ Maintenance mode OFF — signups open to everyone.", "success")
+    return redirect(url_for('index'))
+
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
     global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE   # declare at top — Python 3.14 requires this
@@ -965,14 +983,23 @@ def admin_action():
         if new_mode not in ('Open', 'Split', 'Team'):
             new_mode = 'Open'
 
-        # PATCH Play Mode — check the response so we know if it actually saved
+        # PATCH Play Mode — typecast:true handles Single Select fields
         r = requests.patch(
             f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-            headers=HEADERS, json={"fields": {"Play Mode": new_mode}}, timeout=10)
+            headers=HEADERS,
+            json={"fields": {"Play Mode": new_mode}, "typecast": True},
+            timeout=10)
 
         if not r.ok:
             flash(f"Mode switch failed — Airtable returned {r.status_code}. "
-                  f"Try again or edit the Play Mode field in Airtable directly.", "danger")
+                  f"Set Play Mode to '{new_mode}' directly in the Airtable Settings table.", "danger")
+            return redirect(url_for('index'))
+
+        # Verify Airtable actually stored the new value
+        actual_mode = r.json().get('fields', {}).get('Play Mode')
+        if actual_mode and actual_mode != new_mode:
+            flash(f"Airtable stored '{actual_mode}' instead of '{new_mode}'. "
+                  f"Add '{new_mode}' as a Select option in the Play Mode field, then try again.", "danger")
             return redirect(url_for('index'))
 
         # Court Map reset — best effort
@@ -983,9 +1010,8 @@ def admin_action():
         except: pass
 
         # Three-layer persistence so mode survives cache expiry AND process restarts:
-        # 1. Update the cache using Airtable's confirmed response body
+        # 1. Update cache with exactly what Airtable confirmed — not our assumption
         confirmed_fields = r.json().get('fields', {})
-        confirmed_fields['Play Mode'] = new_mode   # ensure it's there even if Airtable omits unchanged fields
         for key in list(AIRTABLE_CACHE.keys()):
             if key.startswith('Settings'):
                 _, records = AIRTABLE_CACHE[key]
