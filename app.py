@@ -1098,7 +1098,9 @@ def cron_monday():
                  "<br><i>(I may shift numbers on Friday to a 4/2 arrangement if sign-ups support it.)</i>",
         'Team':  "This week we are in <b>Team</b> mode — captains sign up a full court (4 players) and can list reserves. "
                  "Log in, click <b>Start a Team</b>, and submit your court request. "
-                 "I'll review and approve court assignments before the roster goes live.",
+                 "I'll review and approve court assignments before the roster goes live.<br><br>"
+                 "<b>After submitting your team:</b> you should receive a confirmation email within a few minutes. "
+                 "If you don't, something may have gone wrong — contact Jim rather than submitting again.",
     }
     mode_explanation = mode_descriptions.get(play_mode, mode_descriptions['Open'])
 
