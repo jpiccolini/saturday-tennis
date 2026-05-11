@@ -722,8 +722,13 @@ def _process_team_slots(user, form, court_count):
         if is_res:
             court_num = 0
         else:
-            court_players = sum(1 for p in confirmed if not p['is_reserve'])
-            court_num = ((court_players) // 4) + 1
+            cn_form = form.get(f'court_num_{i}')
+            if cn_form is not None:
+                try: court_num = int(cn_form)
+                except: court_num = 1
+            else:
+                court_players = sum(1 for p in confirmed if not p['is_reserve'])
+                court_num = ((court_players) // 4) + 1
 
         if code and code != 'new':
             # Client confirmed a match — look them up by code
@@ -738,9 +743,11 @@ def _process_team_slots(user, form, court_count):
                     'level': m['fields'].get('Level', ''),
                     'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
                 })
-                continue   # successfully added — skip further processing for this slot
+                continue
+            # Code not found in Master List — fall back to name lookup
+            code = ''
 
-        elif first and last and not code:
+        if first and last and not code:
             # Client didn't confirm a code — try server-side name match as fallback
             exact, near = find_player_matches(first, last, master_list)
             if exact:
