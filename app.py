@@ -940,9 +940,16 @@ def admin_action():
         new_mode = request.form.get('new_mode', 'Open')
         if new_mode not in ('Open', 'Split', 'Team'):
             new_mode = 'Open'
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
-            json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})
+        # Two separate patches so a Court Map field issue can't block the mode change
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+            headers=HEADERS, json={"fields": {"Play Mode": new_mode}}, timeout=10)
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                headers=HEADERS, json={"fields": {"Court Map": "{}"}}, timeout=10)
+        except: pass
+        AIRTABLE_CACHE.clear()
         flash(f"Switched to {new_mode} Mode.", "success")
+        return redirect(url_for('index'))
     elif action == "assign_court" and settings:
         import json
         logical  = request.form.get('logical', '').strip()
@@ -965,7 +972,11 @@ def admin_action():
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Show Venmo": not current}})
         flash(f"Venmo card {'hidden' if current else 'shown'}.", "success")
     elif action == "reset_roster":
-        return cron_monday()
+        signups = get_airtable_data("Signups", sort_field="Created Time")
+        _archive_and_clear_signups(settings, signups)
+        log_activity("Admin", "Manual roster reset — signups archived, no emails sent")
+        flash("Roster cleared and archived. Signup emails will go out via the Monday cron at 8:15 AM.", "success")
+        return redirect(url_for('index'))
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
@@ -1080,6 +1091,27 @@ def reorder():
 
 # === SECTION 7: CRON / AUTOMATION ===
 
+def _archive_and_clear_signups(settings, signups):
+    """Archive all current signups then delete them from the Signups table.
+    Called by both cron_monday (with emails) and the manual admin reset (no emails)."""
+    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
+    for r in signups:
+        try:
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS,
+                json={"fields": {
+                    "First":       r['fields'].get('First'),
+                    "Last":        r['fields'].get('Last'),
+                    "Player Code": str(r['fields'].get('Player Code', '')),
+                    "Date":        d_date,
+                    "Attendance":  r['fields'].get('Label', 'Signed Up'),
+                    "Level":       r['fields'].get('Level', '')
+                }, "typecast": True})
+        except: pass
+        try:
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
+        except: pass
+    AIRTABLE_CACHE.clear()
+
 # Helper for friendly numbers (1st, 2nd, 3rd)
 def get_ordinal(n):
     if 11 <= (n % 100) <= 13: return str(n) + 'th'
@@ -1139,14 +1171,7 @@ def cron_monday():
         send_email(ADMIN_EMAIL, f"📊 Weekly Stats for {d_date}", f"<p>Here is the breakdown of ratings that made the cutoff and played this past Saturday:</p><h3>{stats_msg}</h3>")
 
     # 3. Archive everyone (with their Level) and clear signups
-    for r in signups:
-        try:
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Archive", headers=HEADERS, json={"fields": {"First": r['fields'].get('First'), "Last": r['fields'].get('Last'), "Player Code": str(r['fields'].get('Player Code','')), "Date": d_date, "Attendance": r['fields'].get('Label', 'Signed Up'), "Level": r['fields'].get('Level', '')}, "typecast": True})
-        except: pass
-        
-        try:
-            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}", headers=HEADERS)
-        except: pass
+    _archive_and_clear_signups(settings, signups)
             
     # 4. Open signups for the new week
     try:
