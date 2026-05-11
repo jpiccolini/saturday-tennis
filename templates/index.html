@@ -17,7 +17,7 @@
         .court-select { display:inline-block; width:auto; font-size:0.75rem; padding:0.1rem 0.3rem; }
     </style>
 </head>
- 
+
 {# ── Court reassign dropdown macro (admin only) ─────────────────────────────
    logical : the 1-based position key used in court_map
    physical: the currently-assigned physical court number (1-6)
@@ -70,20 +70,20 @@
                 {% endif %}
             </div>
         </div>
- 
+
         {% if session.get('user') and (not session.user.get('contact_confirmed') or not session.user.get('level')) %}
             <div class="alert alert-danger shadow-sm text-center border-danger mb-4">
                 <h4 class="alert-heading fw-bold mb-1">🚨 Action Required!</h4>
                 <p class="mb-0">Your account is temporarily locked. Please confirm your contact info and assign your play level to continue.</p>
             </div>
         {% endif %}
- 
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}
                 <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
             {% endfor %}{% endif %}
         {% endwith %}
- 
+
         <div class="row">
             <div class="col-lg-4 col-md-5 mb-4">
                 {% if session.get('user') %}
@@ -100,28 +100,32 @@
                                 <div class="p-3 mb-3 text-start admin-sidebar-box">
                                     <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
                                     
-                                    <form action="/admin_action" method="POST" class="mb-3">
-                                        <input type="hidden" name="action" value="toggle_mode">
-                                        <button class="btn btn-sm btn-primary w-100 fw-bold shadow-sm">🔄 Switch to
-                                            {% if play_mode == 'Open' %}Split
-                                            {% elif play_mode == 'Split' %}Team
-                                            {% else %}Open{% endif %} Mode
-                                        </button>
-                                    </form>
- 
+                                    <div class="mb-3">
+                                        <p class="small text-muted mb-1 fw-bold">Play Mode</p>
+                                        {% for mode in ['Open', 'Split', 'Team'] %}
+                                        <form action="/admin_action" method="POST" class="mb-1">
+                                            <input type="hidden" name="action" value="toggle_mode_direct">
+                                            <input type="hidden" name="new_mode" value="{{ mode }}">
+                                            <button class="btn btn-sm w-100 {% if play_mode == mode %}btn-primary fw-bold{% else %}btn-outline-secondary{% endif %}">
+                                                {% if play_mode == mode %}✓ {% endif %}{{ mode }} Mode
+                                            </button>
+                                        </form>
+                                        {% endfor %}
+                                    </div>
+
                                     <form action="/admin_action" method="POST" class="mb-3">
                                         <input type="hidden" name="action" value="toggle_venmo">
                                         <button class="btn btn-sm w-100 fw-bold shadow-sm {% if show_venmo %}btn-info{% else %}btn-outline-secondary{% endif %}">
                                             💙 Venmo Card: {% if show_venmo %}ON{% else %}OFF{% endif %}
                                         </button>
                                     </form>
- 
+
                                     <form action="/admin_action" method="POST" class="mb-3"
                                           onsubmit="return confirm('Reset all court assignments to auto?')">
                                         <input type="hidden" name="action" value="reset_courts">
                                         <button class="btn btn-sm btn-outline-warning w-100">🔄 Reset Court Assignments</button>
                                     </form>
- 
+
                                     <h6 class="small fw-bold mt-2">📣 Message Blast</h6>
                                     <form action="/info_blast" method="POST" class="mb-3">
                                         <textarea name="message" class="form-control form-control-sm mb-2" rows="2" placeholder="Message..." required></textarea>
@@ -144,7 +148,7 @@
                                     </form>
                                 </div>
                             {% endif %}
- 
+
                             {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}
                                 <button class="btn btn-danger btn-lg w-100 fw-bold shadow" data-bs-toggle="modal" data-bs-target="#profileModal">
                                     Review Profile to Unlock
@@ -156,13 +160,13 @@
                                         <form action="/accept_sub" method="POST"><button class="btn btn-success w-100 fw-bold">Accept Spot</button></form>
                                     </div>
                                 {% endif %}
- 
+
                                 {% if user_on_roster %}
                                     <div class="alert alert-success">On Roster! {% if waitlist_pos > 0 %}(Waitlist #{{ waitlist_pos }}){% endif %}</div>
                                     {% if play_mode == 'Team' and my_team_id %}
                                         {% for team in team_list %}{% if team.team_id == my_team_id %}{% if team.captain and team.captain.get('Player Code')|string == session.user.get('code')|string %}
                                         <button class="btn btn-warning w-100 fw-bold mb-2"
-                                                onclick="openTeamModal('{{ team.team_id }}', {{ team.courts | tojson }})">
+                                                onclick="openTeamModal('{{ team.team_id }}', {{ team.courts | tojson }}, {{ team.reserves | tojson }})">
                                             ✏️ Edit My Team
                                         </button>
                                         {% endif %}{% endif %}{% endfor %}
@@ -179,7 +183,7 @@
                                     <form action="/signup" method="POST"><button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">Sign Up to Play</button></form>
                                     {% endif %}
                                 {% endif %}
- 
+
                                 <button class="btn btn-sm btn-outline-secondary w-100 mt-3" data-bs-toggle="collapse" data-bs-target="#guestForm">Request Guest</button>
                                 <div id="guestForm" class="collapse mt-2 text-start p-2 border rounded bg-light">
                                     <form action="/request_guest" method="POST">
@@ -191,7 +195,7 @@
                             {% endif %}
                         </div>
                     </div>
- 
+
                     <div class="modal fade" id="profileModal" tabindex="-1" {% if not session.user.get('contact_confirmed') or not session.user.get('level') %}data-bs-backdrop="static" data-bs-keyboard="false"{% endif %}>
                         <div class="modal-dialog">
                             <form action="/update_profile" method="POST" class="modal-content">
@@ -218,7 +222,7 @@
                                             <small class="text-muted fst-italic">Contact admin to change your level.</small>
                                         {% endif %}
                                     </div>
- 
+
                                     <label class="form-label small fw-bold">Email</label>
                                     <input type="email" name="email" class="form-control mb-2" value="{{ session.user.get('email', '') }}" required>
                                     <label class="form-label small fw-bold">Phone</label>
@@ -231,7 +235,7 @@
                             </form>
                         </div>
                     </div>
- 
+
                 {% else %}
                     <div class="card shadow mb-4">
                         <div class="card-header bg-primary text-white"><h5>Player Login</h5></div>
@@ -255,7 +259,7 @@
                         </div>
                     </div>
                 {% endif %}
- 
+
                 <!-- Venmo chip-in card — controlled by admin toggle -->
                 {% if session.get('user') and show_venmo %}
                 <div class="card shadow-sm mb-4 text-center" style="background:#EAF4FF; border: 1px solid #008CFF55 !important;">
@@ -269,9 +273,9 @@
                     </div>
                 </div>
                 {% endif %}
- 
+
             </div>
- 
+
             <div class="col-lg-8 col-md-7">
                 <div class="card shadow mb-4 border-dark">
                     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#rosterCollapse">
@@ -288,7 +292,6 @@
                                         {% if loop.index0 < playing_cutoff %}
                                             <h6 class="mt-3 text-success fw-bold border-bottom border-success pb-1">
                                                 🎾 Court {{ physical }}
-                                                {{ court_picker(logical, physical) }}
                                             </h6>
                                         {% elif loop.index0 == playing_cutoff %}
                                             <h6 class="mt-4 text-warning fw-bold border-bottom border-warning pb-1">⏳ Waitlist</h6>
@@ -316,10 +319,58 @@
                                     </div>
                                 {% endfor %}
                                 {% if not roster %}<div class="text-center py-5 text-muted">No one has signed up yet.</div>{% endif %}
- 
+
                             {% elif play_mode == 'Team' %}
+
+                                {# ── PENDING TEAMS (admin only) ──────────────────────── #}
+                                {% if session.get('user') and session.user.get('is_admin') and pending_teams %}
+                                <div class="alert alert-warning border-warning mb-3">
+                                    <h6 class="fw-bold mb-2">⏳ Pending Team Requests ({{ pending_teams|length }})</h6>
+                                    {% for team in pending_teams %}
+                                        {% set captain = team.captain %}
+                                        <div class="p-2 border rounded bg-white mb-2 shadow-sm">
+                                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                                <div>
+                                                    <b>{{ captain.get('First','?') }} {{ captain.get('Last','') }}</b>
+                                                    — requested <b>{{ team.requested_courts }} court(s)</b>
+                                                    ({{ team.courts|length * 4 - (4 - team.courts[-1]|length if team.courts else 0) }} players
+                                                    {% if team.reserves %} + {{ team.reserves|length }} reserve(s){% endif %})
+                                                    <div class="small text-muted mt-1">
+                                                        {% for court in team.courts %}
+                                                            <b>Court {{ loop.index }}:</b>
+                                                            {% for p in court %}{{ p.get('First','') }} {{ p.get('Last','') }}{% if not loop.last %}, {% endif %}{% endfor %}
+                                                            {% if not loop.last %} &nbsp;|&nbsp; {% endif %}
+                                                        {% endfor %}
+                                                        {% if team.reserves %}
+                                                            &nbsp;| <b>Reserves:</b>
+                                                            {% for r in team.reserves %}{{ r.get('First','') }} {{ r.get('Last','') }}{% if not loop.last %}, {% endif %}{% endfor %}
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                                <form action="/team/approve/{{ team.team_id }}" method="POST"
+                                                      class="d-flex align-items-center gap-2 flex-shrink-0">
+                                                    <label class="small mb-0">Approve</label>
+                                                    <select name="approved_courts" class="form-select form-select-sm" style="width:auto">
+                                                        {% for c in range(1, team.requested_courts + 1) %}
+                                                        <option value="{{ c }}" {% if c == team.requested_courts %}selected{% endif %}>{{ c }} court(s)</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <button type="submit" class="btn btn-sm btn-success fw-bold">✓ Approve</button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+
+                                {# ── APPROVED TEAMS ──────────────────────────────────── #}
                                 {% if not team_list %}
-                                    <div class="text-center py-5 text-muted">No teams yet. Log in and click <b>Start a Team</b>.</div>
+                                    <div class="text-center py-5 text-muted">
+                                        No approved teams yet.
+                                        {% if not (session.get('user') and session.user.get('is_admin')) %}
+                                        Log in and click <b>Start a Team</b> to submit a court request.
+                                        {% endif %}
+                                    </div>
                                 {% endif %}
                                 {% for team in team_list %}
                                     {% set captain = team.captain %}
@@ -330,16 +381,16 @@
                                                 <span class="badge bg-secondary ms-1">{{ team.courts | length }} court(s)</span>
                                             </h6>
                                             {% if session.get('user') %}
-                                                {% set is_my_team = (my_team_id == team.team_id) %}
-                                                {% set am_captain = is_my_team and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
+                                                {% set am_captain = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
                                                 {% if am_captain %}
                                                 <button class="btn btn-sm btn-outline-warning"
-                                                        onclick="openTeamModal('{{ team.team_id }}', {{ team.courts | tojson }})">
+                                                        onclick="openTeamModal('{{ team.team_id }}', {{ team.courts | tojson }}, {{ team.reserves | tojson }})">
                                                     ✏️ Edit
                                                 </button>
                                                 {% endif %}
                                             {% endif %}
                                         </div>
+                                        {# Courts #}
                                         {% set ns = namespace(team_court_seq=0) %}
                                         {% for court in team.courts %}
                                             {% set ns.team_court_seq = ns.team_court_seq + 1 %}
@@ -368,6 +419,26 @@
                                                 </div>
                                             {% endfor %}
                                         {% endfor %}
+                                        {# Reserves #}
+                                        {% if team.reserves %}
+                                        <div class="mt-2 pt-2 border-top">
+                                            <h6 class="text-secondary fw-bold small mb-1">📋 Reserves</h6>
+                                            {% for player in team.reserves %}
+                                                <div class="list-group-item d-flex justify-content-between align-items-center mb-1 p-2 border rounded small" style="background:#f8f9fa; border-style:dashed !important;">
+                                                    <span class="text-muted">{{ player.get('First','') }} {{ player.get('Last','') }}</span>
+                                                    {% if session.get('user') %}
+                                                        {% set am_cap_res = my_team_id == team.team_id and captain and captain.get('Player Code')|string == session.user.get('code')|string %}
+                                                        {% if am_cap_res or session.user.get('is_admin') %}
+                                                        <form action="/team/remove_player/{{ player.get('id') }}" method="POST" class="m-0 p-0"
+                                                              onsubmit="return confirm('Remove {{ player.get('First','') }} from reserves?')">
+                                                            <button type="submit" class="btn btn-outline-danger btn-move" title="Remove">✕</button>
+                                                        </form>
+                                                        {% endif %}
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
                                     </div>
                                 {% endfor %}
                             
@@ -385,7 +456,6 @@
                                                     {% if loop.index0 < lower_cutoff %}
                                                         <h6 class="mt-2 text-success fw-bold small">
                                                             🎾 Court {{ physical }}
-                                                            {{ court_picker(logical, physical, 'L') }}
                                                         </h6>
                                                     {% elif loop.index0 == lower_cutoff %}
                                                         <h6 class="mt-3 text-warning fw-bold small">⏳ Waitlist</h6>
@@ -406,7 +476,7 @@
                                             {% if not lower_roster %}<p class="text-muted small text-center my-3">No signups yet.</p>{% endif %}
                                         </div>
                                     </div>
- 
+
                                     <div class="col-md-6 mb-4">
                                         <div class="p-2 bg-white rounded shadow-sm border h-100">
                                             <h5 class="text-center text-danger fw-bold mb-0">4.0 / 4.5 Courts</h5>
@@ -419,7 +489,6 @@
                                                     {% if loop.index0 < upper_cutoff %}
                                                         <h6 class="mt-2 text-success fw-bold small">
                                                             🎾 Court {{ physical }}
-                                                            {{ court_picker(logical, physical, 'U') }}
                                                         </h6>
                                                     {% elif loop.index0 == upper_cutoff %}
                                                         <h6 class="mt-3 text-warning fw-bold small">⏳ Waitlist</h6>
@@ -446,7 +515,7 @@
                         </div>
                     </div>
                 </div>
- 
+
                 {% if session.get('user') and session.user.get('is_admin') %}
                 <div class="card shadow border-danger mb-4">
                     <div class="card-header bg-danger text-white"><h5 class="mb-0">Pending Approvals</h5></div>
@@ -470,7 +539,7 @@
                 {% endif %}
             </div>
         </div>
- 
+
         {% if session.get('user') %}
         <div class="card mt-2 shadow border-0 mb-5">
             <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center clickable-header" data-bs-toggle="collapse" data-bs-target="#dirCollapse">
@@ -498,7 +567,7 @@
         </div>
         {% endif %}
     </div>
- 
+
     <!-- ===== TEAM MODE MODAL ===== -->
     {% if play_mode == 'Team' and session.get('user') %}
     <div class="modal fade" id="teamModal" tabindex="-1">
@@ -513,7 +582,7 @@
                         You are the captain of Court 1. Add teammates by name — the system will look them up.
                         If a player isn't in the system, provide their email and we'll create their account.
                     </p>
- 
+
                     <!-- Court 1 -->
                     <div class="mb-4">
                         <h6 class="fw-bold text-success border-bottom pb-1">🎾 Court 1</h6>
@@ -525,7 +594,7 @@
                         <button type="button" class="btn btn-sm btn-outline-success mt-1"
                                 onclick="addSlot(1)" id="addBtn1">+ Add Teammate to Court 1</button>
                     </div>
- 
+
                     <!-- Court 2 (hidden by default) -->
                     <div id="court2section" style="display:none" class="mb-4">
                         <h6 class="fw-bold text-danger border-bottom pb-1">🎾 Court 2</h6>
@@ -533,12 +602,21 @@
                         <button type="button" class="btn btn-sm btn-outline-danger mt-1"
                                 onclick="addSlot(2)" id="addBtn2">+ Add Player to Court 2</button>
                     </div>
- 
+
                     <div class="d-flex gap-2 mt-2 border-top pt-3">
                         <button type="button" id="addCourtBtn" class="btn btn-sm btn-outline-secondary"
                                 onclick="addCourt()">+ Add a 2nd Court</button>
                         <button type="button" id="removeCourtBtn" class="btn btn-sm btn-outline-danger"
                                 style="display:none" onclick="removeCourt()">− Remove Court 2</button>
+                    </div>
+
+                    <!-- Reserves -->
+                    <div class="mt-3 pt-2 border-top">
+                        <h6 class="fw-bold text-secondary">📋 Reserves <small class="text-muted fw-normal">(optional)</small></h6>
+                        <p class="small text-muted mb-2">Add extra players here. They'll be listed as reserves and moved to a court if someone drops out.</p>
+                        <div id="slots-reserve"></div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                                onclick="addReserveSlot()">+ Add Reserve Player</button>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -551,7 +629,7 @@
         </div>
     </div>
     {% endif %}
- 
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -561,7 +639,7 @@
                 });
                 profileModal.show();
             {% endif %}
- 
+
             const searchInput = document.getElementById('directorySearch');
             if(searchInput) {
                 searchInput.addEventListener('keyup', function() {
@@ -573,17 +651,17 @@
                 });
             }
         });
- 
+
         // ===== TEAM MODAL LOGIC =====
         let teamSlotCounts = {1: 0, 2: 0};
         let currentTeamId = null;
- 
-        function openTeamModal(teamId, courts) {
+
+        function openTeamModal(teamId, courts, reserves) {
             currentTeamId = teamId;
             document.getElementById('teamModalTitle').textContent = teamId ? 'Edit My Team' : 'Start a Team';
- 
+
             // Reset slots
-            ['slots-court1', 'slots-court2'].forEach(id => {
+            ['slots-court1', 'slots-court2', 'slots-reserve'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = '';
             });
@@ -591,22 +669,59 @@
             document.getElementById('court2section').style.display = 'none';
             document.getElementById('addCourtBtn').style.display = '';
             document.getElementById('removeCourtBtn').style.display = 'none';
- 
-            // If editing, pre-populate from existing courts data
+
             if (courts && courts.length) {
                 courts.forEach((court, ci) => {
                     const courtNum = ci + 1;
                     if (courtNum === 2) addCourt();
                     court.forEach(player => {
-                        if (player['Is Captain']) return;   // skip captain slot (it's fixed)
+                        if (player['Is Captain']) return;
                         addSlot(courtNum, player);
                     });
                 });
             }
- 
+            if (reserves && reserves.length) {
+                reserves.forEach(player => addReserveSlot(player));
+            }
+
             new bootstrap.Modal(document.getElementById('teamModal')).show();
         }
- 
+
+        let reserveCount = 0;
+
+        function addReserveSlot(prefill) {
+            const idx = `res${reserveCount}`;
+            reserveCount++;
+            const div = document.createElement('div');
+            div.id = `slot-${idx}`;
+            div.className = 'mb-2 p-2 border rounded bg-white';
+            div.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <input type="text" class="form-control form-control-sm" placeholder="First"
+                           id="first-${idx}" value="${prefill ? prefill['First'] || '' : ''}">
+                    <input type="text" class="form-control form-control-sm" placeholder="Last"
+                           id="last-${idx}" value="${prefill ? prefill['Last'] || '' : ''}"
+                           onblur="lookupPlayer('${idx}')">
+                    <span class="badge bg-secondary flex-shrink-0">Reserve</span>
+                    <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0"
+                            onclick="document.getElementById('slot-${idx}').remove()">✕</button>
+                </div>
+                <div id="status-${idx}" class="mt-1 small"></div>
+                <input type="hidden" id="code-${idx}" value="${prefill ? prefill['Player Code'] || '' : ''}">
+                <input type="hidden" id="isres-${idx}" value="1">
+                <div id="extra-${idx}" class="mt-2" style="display:none">
+                    <input type="email" class="form-control form-control-sm mb-1"
+                           id="email-${idx}" placeholder="Email (required to create account)">
+                    <input type="text"  class="form-control form-control-sm"
+                           id="phone-${idx}" placeholder="Phone (optional)">
+                </div>`;
+            document.getElementById('slots-reserve').appendChild(div);
+            if (prefill && prefill['Player Code']) {
+                document.getElementById(`status-${idx}`).innerHTML =
+                    `<span class="text-success">✓ ${prefill['First']} ${prefill['Last']}</span>`;
+            }
+        }
+
         function addSlot(court, prefill) {
             const maxSlots = court === 1 ? 3 : 4;
             if (teamSlotCounts[court] >= maxSlots) {
@@ -616,7 +731,7 @@
             const n = teamSlotCounts[court];
             teamSlotCounts[court]++;
             const idx = `c${court}s${n}`;
- 
+
             const div = document.createElement('div');
             div.id = `slot-${idx}`;
             div.className = 'mb-2 p-2 border rounded bg-white';
@@ -639,28 +754,28 @@
                            id="phone-${idx}" placeholder="Phone (optional)">
                 </div>`;
             document.getElementById(`slots-court${court}`).appendChild(div);
- 
+
             // If pre-filling with existing player, mark as confirmed immediately
             if (prefill && prefill['Player Code']) {
                 document.getElementById(`status-${idx}`).innerHTML =
                     `<span class="text-success">✓ ${prefill['First']} ${prefill['Last']}</span>`;
             }
         }
- 
+
         function removeSlot(idx, court) {
             const el = document.getElementById(`slot-${idx}`);
             if (el) el.remove();
             teamSlotCounts[court] = Math.max(0, teamSlotCounts[court] - 1);
         }
- 
+
         async function lookupPlayer(idx) {
             const first = (document.getElementById(`first-${idx}`)?.value || '').trim();
             const last  = (document.getElementById(`last-${idx}`)?.value  || '').trim();
             if (!first || !last) return;
- 
+
             const statusDiv = document.getElementById(`status-${idx}`);
             statusDiv.innerHTML = '<span class="text-muted fst-italic">Looking up…</span>';
- 
+
             try {
                 const res  = await fetch('/team/lookup', {
                     method: 'POST',
@@ -668,13 +783,13 @@
                     body: JSON.stringify({first, last})
                 });
                 const data = await res.json();
- 
+
                 if (data.status === 'exact') {
                     document.getElementById(`code-${idx}`).value = data.player.code;
                     document.getElementById(`extra-${idx}`).style.display = 'none';
                     statusDiv.innerHTML =
                         `<span class="text-success">✓ Found: <b>${data.player.first} ${data.player.last}</b></span>`;
- 
+
                 } else if (data.status === 'near') {
                     const opts = data.matches.map(m =>
                         `<option value="${m.code}">${m.first} ${m.last}</option>`
@@ -687,7 +802,7 @@
                             ${opts}
                             <option value="new">Not listed — new player</option>
                         </select>`;
- 
+
                 } else {
                     document.getElementById(`code-${idx}`).value = 'new';
                     document.getElementById(`extra-${idx}`).style.display = 'block';
@@ -698,7 +813,7 @@
                 statusDiv.innerHTML = '<span class="text-danger">Lookup failed — check name and try again</span>';
             }
         }
- 
+
         function selectNearMatch(idx, sel) {
             const val = sel.value;
             if (!val) return;
@@ -716,14 +831,14 @@
                     `<span class="text-success">✓ Confirmed: <b>${label}</b></span>`;
             }
         }
- 
+
         function addCourt() {
             document.getElementById('court2section').style.display = '';
             document.getElementById('addCourtBtn').style.display = 'none';
             document.getElementById('removeCourtBtn').style.display = '';
             if (teamSlotCounts[2] === 0) addSlot(2);   // open first slot automatically
         }
- 
+
         function removeCourt() {
             if (!confirm('Remove Court 2 and all its players from this submission?')) return;
             document.getElementById('slots-court2').innerHTML = '';
@@ -732,53 +847,61 @@
             document.getElementById('addCourtBtn').style.display = '';
             document.getElementById('removeCourtBtn').style.display = 'none';
         }
- 
+
         function submitTeam() {
-            // Validate: every visible slot needs either a confirmed code or (name + email for new)
             let errors = [];
             let slotIdx = 0;
             const hiddenForm = document.createElement('form');
             hiddenForm.method = 'POST';
             hiddenForm.action = currentTeamId ? `/team/update/${currentTeamId}` : '/team/create';
- 
+
             const courtCount = document.getElementById('court2section').style.display === 'none' ? 1 : 2;
             hiddenForm.appendChild(_input('court_count', courtCount));
- 
-            for (let court = 1; court <= 2; court++) {
-                const container = document.getElementById(`slots-court${court}`);
-                if (!container) continue;
+
+            // Collect court slots then reserve slots
+            const allContainers = [
+                {id: 'slots-court1', isRes: false},
+                {id: 'slots-court2', isRes: false},
+                {id: 'slots-reserve', isRes: true}
+            ];
+
+            allContainers.forEach(({id, isRes}) => {
+                const container = document.getElementById(id);
+                if (!container) return;
                 container.querySelectorAll('[id^="slot-"]').forEach(slotDiv => {
-                    const id    = slotDiv.id.replace('slot-', '');
-                    const first = (document.getElementById(`first-${id}`)?.value || '').trim();
-                    const last  = (document.getElementById(`last-${id}`)?.value  || '').trim();
-                    const code  = (document.getElementById(`code-${id}`)?.value  || '').trim();
-                    const email = (document.getElementById(`email-${id}`)?.value || '').trim();
-                    const phone = (document.getElementById(`phone-${id}`)?.value || '').trim();
- 
-                    if (!first && !last) return;  // empty, skip
- 
+                    const sid   = slotDiv.id.replace('slot-', '');
+                    const first = (document.getElementById(`first-${sid}`)?.value || '').trim();
+                    const last  = (document.getElementById(`last-${sid}`)?.value  || '').trim();
+                    const code  = (document.getElementById(`code-${sid}`)?.value  || '').trim();
+                    const email = (document.getElementById(`email-${sid}`)?.value || '').trim();
+                    const phone = (document.getElementById(`phone-${sid}`)?.value || '').trim();
+                    const res   = (document.getElementById(`isres-${sid}`)?.value || '0');
+
+                    if (!first && !last) return;
+
                     if (!code) {
-                        errors.push(`"${first} ${last}" hasn't been looked up yet — click the Last name field to trigger lookup.`);
+                        errors.push(`"${first} ${last}" hasn't been looked up yet — click the Last name field.`);
                     } else if (code === 'new' && !email) {
-                        errors.push(`"${first} ${last}" is a new player — email is required.`);
+                        errors.push(`"${first} ${last}" is new — email is required.`);
                     }
- 
-                    hiddenForm.appendChild(_input(`first_${slotIdx}`,       first));
-                    hiddenForm.appendChild(_input(`last_${slotIdx}`,        last));
-                    hiddenForm.appendChild(_input(`player_code_${slotIdx}`, code));
-                    hiddenForm.appendChild(_input(`email_${slotIdx}`,       email));
-                    hiddenForm.appendChild(_input(`phone_${slotIdx}`,       phone));
+
+                    hiddenForm.appendChild(_input(`first_${slotIdx}`,        first));
+                    hiddenForm.appendChild(_input(`last_${slotIdx}`,         last));
+                    hiddenForm.appendChild(_input(`player_code_${slotIdx}`,  code));
+                    hiddenForm.appendChild(_input(`email_${slotIdx}`,        email));
+                    hiddenForm.appendChild(_input(`phone_${slotIdx}`,        phone));
+                    hiddenForm.appendChild(_input(`is_reserve_${slotIdx}`,   res === '1' || isRes ? '1' : '0'));
                     slotIdx++;
                 });
-            }
- 
+            });
+
             if (errors.length) { alert('Please fix:\n\n' + errors.join('\n')); return; }
             if (slotIdx === 0 && !currentTeamId) { alert('Add at least one teammate before saving.'); return; }
- 
+
             document.body.appendChild(hiddenForm);
             hiddenForm.submit();
         }
- 
+
         function _input(name, value) {
             const el = document.createElement('input');
             el.type = 'hidden'; el.name = name; el.value = value;
@@ -787,4 +910,3 @@
     </script>
 </body>
 </html>
- 
