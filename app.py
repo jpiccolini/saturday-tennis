@@ -139,6 +139,7 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
 # === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION) ===
 AIRTABLE_CACHE = {}
 PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
+MAINTENANCE_MODE = False    # when True, only admin can sign up or create teams
 CACHE_TTL = 300       # cache successful fetches for 5 min — well within Airtable Team plan quota
 ERROR_CACHE_TTL = 30  # on failure, hold the empty/stale result for 30s before retrying
 
@@ -413,7 +414,7 @@ def index():
                            upper_roster=upper_roster, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff,
                            show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
                            court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
-                           pending_teams=pending_teams)
+                           pending_teams=pending_teams, maintenance_mode=MAINTENANCE_MODE)
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -461,6 +462,10 @@ def logout():
 def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
+
+    if MAINTENANCE_MODE and not user.get('is_admin'):
+        flash("Signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
+        return redirect(url_for('index'))
 
     if not user.get('contact_confirmed') or not user.get('level'):
         flash("Action Required: Please review your profile info to unlock signups.", "danger")
@@ -752,6 +757,10 @@ def team_create():
         flash("Please complete your profile first.", "danger")
         return redirect(url_for('index'))
 
+    if MAINTENANCE_MODE and not user.get('is_admin'):
+        flash("Team signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
+        return redirect(url_for('index'))
+
     existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
     if existing:
         flash("You are already on the roster.", "warning")
@@ -939,7 +948,12 @@ def admin_action():
     if action == "labels" and settings:
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
         flash("Session info updated!", "success")
-    elif action == "toggle_mode" and settings:
+    elif action == "toggle_maintenance":
+        global MAINTENANCE_MODE
+        MAINTENANCE_MODE = not MAINTENANCE_MODE
+        status = "ON — only you can sign up or create teams." if MAINTENANCE_MODE else "OFF — signups open to everyone."
+        flash(f"Maintenance mode {status}", "warning" if MAINTENANCE_MODE else "success")
+        return redirect(url_for('index'))
         global PLAY_MODE_OVERRIDE
         cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
         new_mode = cycle.get(settings[0]['fields'].get('Play Mode', 'Open'), 'Open')
