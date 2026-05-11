@@ -614,45 +614,48 @@ def request_guest():
 @app.route('/team/data/<team_id>')
 def team_data(team_id):
     """Return a team's court/reserve data as clean JSON for the Edit modal."""
-    user = session.get('user')
-    if not user:
-        return jsonify({'error': 'Not logged in'}), 403
-    recs = get_airtable_data("Signups")
-    team_recs = [r for r in recs if r['fields'].get('Team ID') == team_id]
-    if not team_recs:
-        return jsonify({'error': 'Team not found'}), 404
+    try:
+        user = session.get('user')
+        if not user:
+            return jsonify({'error': 'Not logged in'}), 403
+        recs = get_airtable_data("Signups")
+        team_recs = [r for r in recs if r['fields'].get('Team ID') == team_id]
+        if not team_recs:
+            return jsonify({'error': f'Team {team_id} not found in Signups ({len(recs)} records checked)'}), 404
 
-    captain = next((r for r in team_recs if r['fields'].get('Is Captain')), None)
-    app_c   = 1
-    if captain:
-        try: app_c = int(float(captain['fields'].get('Approved Courts') or 1))
-        except: app_c = 1
+        captain = next((r for r in team_recs if r['fields'].get('Is Captain')), None)
+        app_c   = 1
+        if captain:
+            try: app_c = int(float(captain['fields'].get('Approved Courts') or 1))
+            except: app_c = 1
 
-    def safe_player(r):
-        """Only the fields the modal reads — all explicitly typed to avoid serialization issues."""
-        f    = r['fields']
-        code = str(f.get('Player Code') or '').replace('.0', '').strip()
-        cn   = 1
-        try: cn = int(float(f.get('Court Num') or 1))
-        except: pass
-        return {
-            'First':       str(f.get('First')  or ''),
-            'Last':        str(f.get('Last')   or ''),
-            'Player Code': code,
-            'Is Captain':  bool(f.get('Is Captain')),
-            'Is Reserve':  bool(f.get('Is Reserve')),
-            'Court Num':   cn,
-        }
+        def safe_player(r):
+            f    = r.get('fields', r)   # handle both raw records and mutated field dicts
+            code = str(f.get('Player Code') or '').replace('.0', '').strip()
+            cn   = 1
+            try: cn = int(float(f.get('Court Num') or 1))
+            except: pass
+            return {
+                'First':       str(f.get('First')  or ''),
+                'Last':        str(f.get('Last')   or ''),
+                'Player Code': code,
+                'Is Captain':  bool(f.get('Is Captain')),
+                'Is Reserve':  bool(f.get('Is Reserve')),
+                'Court Num':   cn,
+            }
 
-    court_players = [safe_player(r) for r in team_recs if not r['fields'].get('Is Reserve')]
-    reserves      = [safe_player(r) for r in team_recs if r['fields'].get('Is Reserve')]
+        court_players = [safe_player(r) for r in team_recs if not r.get('fields', r).get('Is Reserve')]
+        reserves      = [safe_player(r) for r in team_recs if r.get('fields', r).get('Is Reserve')]
 
-    court_groups = {}
-    for p in court_players:
-        court_groups.setdefault(p['Court Num'], []).append(p)
-    courts = [court_groups.get(cn, []) for cn in range(1, app_c + 1)]
+        court_groups = {}
+        for p in court_players:
+            court_groups.setdefault(p['Court Num'], []).append(p)
+        courts = [court_groups.get(cn, []) for cn in range(1, app_c + 1)]
 
-    return jsonify({'courts': courts, 'reserves': reserves})
+        return jsonify({'courts': courts, 'reserves': reserves})
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'detail': traceback.format_exc()}), 500
 
 
 @app.route('/team/lookup', methods=['POST'])
