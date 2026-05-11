@@ -942,6 +942,7 @@ def team_approve(team_id):
 # === SECTION 6: ADMIN ACTIONS ===
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
+    global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE   # declare at top — Python 3.14 requires this
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     action = request.form.get('action')
     settings = get_airtable_data("Settings")
@@ -949,20 +950,17 @@ def admin_action():
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
         flash("Session info updated!", "success")
     elif action == "toggle_maintenance":
-        global MAINTENANCE_MODE
         MAINTENANCE_MODE = not MAINTENANCE_MODE
         status = "ON — only you can sign up or create teams." if MAINTENANCE_MODE else "OFF — signups open to everyone."
         flash(f"Maintenance mode {status}", "warning" if MAINTENANCE_MODE else "success")
         return redirect(url_for('index'))
-        global PLAY_MODE_OVERRIDE
+    elif action == "toggle_mode" and settings:
         cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
         new_mode = cycle.get(settings[0]['fields'].get('Play Mode', 'Open'), 'Open')
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
             json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})
         PLAY_MODE_OVERRIDE = new_mode
         flash(f"Mode switched to {new_mode}! Court assignments reset.", "success")
-    elif action == "toggle_mode_direct" and settings:
-        global PLAY_MODE_OVERRIDE
         new_mode = request.form.get('new_mode', 'Open')
         if new_mode not in ('Open', 'Split', 'Team'):
             new_mode = 'Open'
