@@ -714,6 +714,11 @@ def _process_team_slots(user, form, court_count):
         email  = form.get(f'email_{i}',       '').strip()
         phone  = form.get(f'phone_{i}',       '').strip()
         is_res = form.get(f'is_reserve_{i}',  '0') == '1'
+        # NOTE: read court_num for THIS slot (i) BEFORE incrementing.
+        # Previous bug: i was incremented before this read, so every player
+        # was assigned the *next* slot's court number, which is why players
+        # like Bryce kept ending up on the wrong court.
+        cn_form = form.get(f'court_num_{i}')
         i += 1
 
         if not first and not last:
@@ -722,7 +727,6 @@ def _process_team_slots(user, form, court_count):
         if is_res:
             court_num = 0
         else:
-            cn_form = form.get(f'court_num_{i}')
             if cn_form is not None:
                 try: court_num = int(cn_form)
                 except: court_num = 1
@@ -900,18 +904,26 @@ def team_create():
             fields = {
                 "First": p['first'], "Last": p['last'],
                 "Player Code": str(p['code']), "Email": p['email'],
-                "Level": p['level'], "Team ID": team_id,
+                "Team ID": team_id,
                 "Is Captain": p.get('is_captain', False),
                 "Is Reserve": p.get('is_reserve', False),
                 "Court Num":  p['court_num']
             }
+            # Only send Level if it's actually set. Empty string would be rejected
+            # by Airtable's Single Select validation, silently dropping the player.
+            if p.get('level'): fields["Level"] = p['level']
             if p.get('is_captain'):
-                fields["Team Status"]     = "Pending"
+                fields["Team Status"]      = "Pending"
                 fields["Requested Courts"] = court_count
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
-                headers=HEADERS, json={"fields": fields}, timeout=10)
+            res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
+                headers=HEADERS, json={"fields": fields, "typecast": True}, timeout=10)
+            res.raise_for_status()
         except Exception as e:
-            errors.append(f"Error adding {p['first']} to roster: {e}")
+            # Surface Airtable's actual error message if available, so captain summary email is informative
+            detail = ""
+            try: detail = f" — {res.json().get('error', {}).get('message', '')}"
+            except: pass
+            errors.append(f"Could not add {p['first']} {p['last']} to roster: {e}{detail}")
 
     _send_captain_summary(user, confirmed, new_accounts, d_date, pending=True, errors=errors)
 
@@ -955,15 +967,24 @@ def team_update(team_id):
     for p in confirmed:
         if p.get('is_captain'): continue   # captain record already exists
         try:
-            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS,
-                json={"fields": {
-                    "First": p['first'], "Last": p['last'],
-                    "Player Code": str(p['code']), "Email": p['email'],
-                    "Level": p['level'], "Team ID": team_id,
-                    "Is Captain": False, "Court Num": p['court_num']
-                }}, timeout=10)
+            fields = {
+                "First": p['first'], "Last": p['last'],
+                "Player Code": str(p['code']), "Email": p['email'],
+                "Team ID": team_id,
+                "Is Captain": False,
+                "Is Reserve": p.get('is_reserve', False),   # was missing — caused reserves to land as court players
+                "Court Num": p['court_num']
+            }
+            # Skip empty Level so Airtable doesn't silently reject the whole record
+            if p.get('level'): fields["Level"] = p['level']
+            res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS,
+                json={"fields": fields, "typecast": True}, timeout=10)
+            res.raise_for_status()
         except Exception as e:
-            errors.append(f"Error adding {p['first']}: {e}")
+            detail = ""
+            try: detail = f" — {res.json().get('error', {}).get('message', '')}"
+            except: pass
+            errors.append(f"Could not add {p['first']} {p['last']} to roster: {e}{detail}")
 
     _send_captain_summary(user, confirmed, new_accounts, d_date, errors=errors)
     AIRTABLE_CACHE.clear()
