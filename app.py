@@ -611,6 +611,28 @@ def request_guest():
 
 # === TEAM MODE ROUTES ===
 
+@app.route('/team/data/<team_id>')
+def team_data(team_id):
+    """Return a team's court and reserve data as JSON for the Edit modal."""
+    user = session.get('user')
+    if not user:
+        return jsonify({'error': 'Not logged in'}), 403
+    recs = get_airtable_data("Signups")
+    team_recs = [r for r in recs if r['fields'].get('Team ID') == team_id]
+    if not team_recs:
+        return jsonify({'error': 'Not found'}), 404
+    captain = next((r for r in team_recs if r['fields'].get('Is Captain')), None)
+    app_c = int(float(captain['fields'].get('Approved Courts') or 1)) if captain else 1
+    court_players = [r['fields'] for r in team_recs if not r['fields'].get('Is Reserve')]
+    reserves      = [r['fields'] for r in team_recs if r['fields'].get('Is Reserve')]
+    court_groups  = {}
+    for p in court_players:
+        cn = int(float(p.get('Court Num') or 1))
+        court_groups.setdefault(cn, []).append(p)
+    courts = [court_groups.get(cn, []) for cn in range(1, app_c + 1)]
+    return jsonify({'courts': courts, 'reserves': reserves})
+
+
 @app.route('/team/lookup', methods=['POST'])
 def team_lookup():
     """AJAX endpoint: fuzzy-match a player name against Master List."""
