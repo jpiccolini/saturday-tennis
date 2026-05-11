@@ -661,8 +661,11 @@
         const teamId = btn.dataset.teamId;
         fetch('/team/data/' + teamId)
             .then(r => r.json())
-            .then(data => openTeamModal(teamId, data.courts || [], data.reserves || []))
-            .catch(() => alert('Could not load team data — please try refreshing the page.'));
+            .then(data => {
+                if (data.error) throw new Error(data.error + (data.detail ? '\n\n' + data.detail : ''));
+                openTeamModal(teamId, data.courts || [], data.reserves || []);
+            })
+            .catch(err => alert('Edit team error: ' + err.message));
     });
     </script>
     {% endif %}
