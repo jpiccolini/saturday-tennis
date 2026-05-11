@@ -138,6 +138,7 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
 
 # === SECTION 3: DATA CACHING ENGINE (WITH PAGINATION) ===
 AIRTABLE_CACHE = {}
+PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
 CACHE_TTL = 300       # cache successful fetches for 5 min — well within Airtable Team plan quota
 ERROR_CACHE_TTL = 30  # on failure, hold the empty/stale result for 30s before retrying
 
@@ -216,8 +217,11 @@ def index():
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
         except: d_end = ""
 
-    # Session override: written by toggle_mode_direct to beat Airtable propagation lag
-    if 'forced_play_mode' in session:
+    # Priority order: module-level override > session override > Airtable cache
+    # Module-level var is set by toggle_mode_direct and survives cache expiry
+    if PLAY_MODE_OVERRIDE and PLAY_MODE_OVERRIDE in ('Open', 'Split', 'Team'):
+        play_mode = PLAY_MODE_OVERRIDE
+    elif 'forced_play_mode' in session:
         play_mode = session.pop('forced_play_mode')
         session.modified = True
 
@@ -936,34 +940,54 @@ def admin_action():
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
         flash("Session info updated!", "success")
     elif action == "toggle_mode" and settings:
+        global PLAY_MODE_OVERRIDE
         cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
         new_mode = cycle.get(settings[0]['fields'].get('Play Mode', 'Open'), 'Open')
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
-            json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})   # reset court map on mode change
+            json={"fields": {"Play Mode": new_mode, "Court Map": "{}"}})
+        PLAY_MODE_OVERRIDE = new_mode
         flash(f"Mode switched to {new_mode}! Court assignments reset.", "success")
     elif action == "toggle_mode_direct" and settings:
+        global PLAY_MODE_OVERRIDE
         new_mode = request.form.get('new_mode', 'Open')
         if new_mode not in ('Open', 'Split', 'Team'):
             new_mode = 'Open'
-        # PATCH Play Mode (critical path, separate from Court Map)
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+
+        # PATCH Play Mode — check the response so we know if it actually saved
+        r = requests.patch(
+            f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
             headers=HEADERS, json={"fields": {"Play Mode": new_mode}}, timeout=10)
+
+        if not r.ok:
+            flash(f"Mode switch failed — Airtable returned {r.status_code}. "
+                  f"Try again or edit the Play Mode field in Airtable directly.", "danger")
+            return redirect(url_for('index'))
+
+        # Court Map reset — best effort
         try:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+            requests.patch(
+                f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
                 headers=HEADERS, json={"fields": {"Court Map": "{}"}}, timeout=10)
         except: pass
-        # Directly update every Settings cache entry so all reads for the next 300s
-        # see the new mode — avoids the Airtable propagation race condition entirely
+
+        # Three-layer persistence so mode survives cache expiry AND process restarts:
+        # 1. Update the cache using Airtable's confirmed response body
+        confirmed_fields = r.json().get('fields', {})
+        confirmed_fields['Play Mode'] = new_mode   # ensure it's there even if Airtable omits unchanged fields
         for key in list(AIRTABLE_CACHE.keys()):
             if key.startswith('Settings'):
-                ts, records = AIRTABLE_CACHE[key]
+                _, records = AIRTABLE_CACHE[key]
                 if records:
-                    records[0]['fields']['Play Mode'] = new_mode
-                    records[0]['fields']['Court Map'] = '{}'
-                    AIRTABLE_CACHE[key] = (ts, records)
-        # Session fallback for the immediate redirect (belt AND suspenders)
+                    records[0]['fields'].update(confirmed_fields)
+                    AIRTABLE_CACHE[key] = (time.time(), records)   # reset TTL from now
+
+        # 2. Module-level var — survives cache expiry for the lifetime of this process
+        PLAY_MODE_OVERRIDE = new_mode
+
+        # 3. Session — covers the immediate redirect
         session['forced_play_mode'] = new_mode
         session.modified = True
+
         flash(f"Switched to {new_mode} Mode.", "success")
         return redirect(url_for('index'))
     elif action == "assign_court" and settings:
