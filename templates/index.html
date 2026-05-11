@@ -344,14 +344,16 @@
                                         <div class="p-2 border rounded bg-white mb-2 shadow-sm">
                                             <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                                                 <div>
+                                                    {% set total_players = namespace(n=0) %}
+                                                    {% for c in team.courts %}{% set total_players.n = total_players.n + c|length %}{% endfor %}
                                                     <b>{{ captain.get('First','?') }} {{ captain.get('Last','') }}</b>
                                                     — requested <b>{{ team.requested_courts }} court(s)</b>
-                                                    ({{ team.courts|length * 4 - (4 - team.courts[-1]|length if team.courts else 0) }} players
-                                                    {% if team.reserves %} + {{ team.reserves|length }} reserve(s){% endif %})
+                                                    ({{ total_players.n }} player{{ 's' if total_players.n != 1 else '' }}{% if team.reserves %} + {{ team.reserves|length }} reserve(s){% endif %})
                                                     <div class="small text-muted mt-1">
                                                         {% for court in team.courts %}
                                                             <b>Court {{ loop.index }}:</b>
                                                             {% for p in court %}{{ p.get('First','') }} {{ p.get('Last','') }}{% if not loop.last %}, {% endif %}{% endfor %}
+                                                            ({{ court|length }}/4)
                                                             {% if not loop.last %} &nbsp;|&nbsp; {% endif %}
                                                         {% endfor %}
                                                         {% if team.reserves %}
@@ -640,7 +642,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-warning fw-bold" onclick="submitTeam()">
+                    <button type="button" class="btn btn-warning fw-bold" onclick="submitTeam().catch(console.error)">
                         💾 Save Team
                     </button>
                 </div>
@@ -867,7 +869,21 @@
             document.getElementById('removeCourtBtn').style.display = 'none';
         }
 
-        function submitTeam() {
+        async function submitTeam() {
+            // Await any slot that has first+last but no code yet (lookup not yet triggered)
+            const pending = [];
+            document.querySelectorAll('[id^="last-"]').forEach(el => {
+                const sid   = el.id.replace('last-', '');
+                const code  = (document.getElementById(`code-${sid}`)?.value || '').trim();
+                const first = (document.getElementById(`first-${sid}`)?.value || '').trim();
+                const last  = (el.value || '').trim();
+                if (first && last && !code) pending.push(lookupPlayer(sid));
+            });
+            if (pending.length) {
+                await Promise.all(pending);
+                await new Promise(r => setTimeout(r, 150));  // let DOM update after lookups
+            }
+
             let errors = [];
             let slotIdx = 0;
             const hiddenForm = document.createElement('form');
