@@ -226,6 +226,11 @@ def index():
         play_mode = session.pop('forced_play_mode')
         session.modified = True
 
+    # Maintenance mode: read from Airtable (persists across restarts), module var as same-session override
+    maintenance_mode = MAINTENANCE_MODE or bool(
+        settings[0]['fields'].get('Maintenance Mode', False) if settings else False
+    )
+
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
     signup_recs = sorted(get_airtable_data("Signups"), key=sort_key)
@@ -668,6 +673,7 @@ def _process_team_slots(user, form, court_count):
             court_num = ((court_players) // 4) + 1
 
         if code and code != 'new':
+            # Client confirmed a match — look them up by code
             m = next((m for m in master_list
                       if str(m['fields'].get('Code', '')).replace('.0', '').strip() == code), None)
             if m:
@@ -679,7 +685,42 @@ def _process_team_slots(user, form, court_count):
                     'level': m['fields'].get('Level', ''),
                     'court_num': court_num, 'is_captain': False, 'is_reserve': is_res
                 })
-        elif first and last and email:
+                continue   # successfully added — skip further processing for this slot
+
+        elif first and last and not code:
+            # Client didn't confirm a code — try server-side name match as fallback
+            exact, near = find_player_matches(first, last, master_list)
+            if exact:
+                m = exact[0]
+                mc = str(m['fields'].get('Code', '')).replace('.0', '').strip()
+                confirmed.append({
+                    'code': mc, 'first': m['fields'].get('First', first),
+                    'last': m['fields'].get('Last', last), 'email': m['fields'].get('Email', ''),
+                    'level': m['fields'].get('Level', ''), 'court_num': court_num,
+                    'is_captain': False, 'is_reserve': is_res
+                })
+                continue
+            elif near and len(near) == 1:
+                # Single near match — safe to auto-confirm server-side
+                m = near[0]
+                mc = str(m['fields'].get('Code', '')).replace('.0', '').strip()
+                confirmed.append({
+                    'code': mc, 'first': m['fields'].get('First', first),
+                    'last': m['fields'].get('Last', last), 'email': m['fields'].get('Email', ''),
+                    'level': m['fields'].get('Level', ''), 'court_num': court_num,
+                    'is_captain': False, 'is_reserve': is_res
+                })
+                continue
+            elif email:
+                code = 'new'   # fall through to new-player creation below
+            elif near:
+                errors.append(f"Multiple possible matches for '{first} {last}' — please use the modal lookup to confirm which player.")
+                continue
+            else:
+                errors.append(f"'{first} {last}' not found — provide their email to create an account.")
+                continue
+
+        if code == 'new' and first and last and email:
             master_list = get_airtable_data("Master List")
             new_code    = next_player_code(master_list)
             try:
@@ -967,10 +1008,21 @@ def admin_action():
     if action == "labels" and settings:
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
         flash("Session info updated!", "success")
-    elif action == "toggle_maintenance":
-        MAINTENANCE_MODE = not MAINTENANCE_MODE
-        status = "ON — only you can sign up or create teams." if MAINTENANCE_MODE else "OFF — signups open to everyone."
-        flash(f"Maintenance mode {status}", "warning" if MAINTENANCE_MODE else "success")
+    elif action == "toggle_maintenance" and settings:
+        current = bool(settings[0]['fields'].get('Maintenance Mode', False))
+        new_val = not current
+        MAINTENANCE_MODE = new_val   # module-level for current session
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+            headers=HEADERS, json={"fields": {"Maintenance Mode": new_val}}, timeout=10)
+        # Update cache so page reflects change immediately
+        for key in list(AIRTABLE_CACHE.keys()):
+            if key.startswith('Settings'):
+                _, records = AIRTABLE_CACHE[key]
+                if records:
+                    records[0]['fields']['Maintenance Mode'] = new_val
+                    AIRTABLE_CACHE[key] = (time.time(), records)
+        status = "ON — only you can sign up or create teams." if new_val else "OFF — signups open to everyone."
+        flash(f"Maintenance mode {status}", "warning" if new_val else "success")
         return redirect(url_for('index'))
     elif action == "toggle_mode" and settings:
         cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
