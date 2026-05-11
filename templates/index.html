@@ -48,6 +48,11 @@
             <span class="badge bg-info text-dark shadow-sm fs-5 mb-3">{{ weather }}</span>
             
             <div class="mt-1">
+                {% if maintenance_mode %}
+                <div class="alert alert-danger text-center py-2 mb-2 fw-bold">
+                    🔒 Signups temporarily paused for maintenance — back shortly!
+                </div>
+                {% endif %}
                 {% if play_mode == 'Split' %}
                     <div class="alert alert-primary py-2 d-inline-block border-primary shadow-sm mb-2">
                         <h5 class="mb-0 fw-bold">🎾 SPLIT MODE ACTIVE</h5>
@@ -99,7 +104,14 @@
                             {% if session.user.get('is_admin') %}
                                 <div class="p-3 mb-3 text-start admin-sidebar-box">
                                     <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
-                                    
+
+                                    <form action="/admin_action" method="POST" class="mb-3">
+                                        <input type="hidden" name="action" value="toggle_maintenance">
+                                        <button class="btn btn-sm w-100 fw-bold {% if maintenance_mode %}btn-danger{% else %}btn-outline-secondary{% endif %}">
+                                            🔒 Maintenance: {% if maintenance_mode %}ON — Only You{% else %}OFF{% endif %}
+                                        </button>
+                                    </form>
+
                                     <div class="mb-3">
                                         <p class="small text-muted mb-1 fw-bold">Play Mode</p>
                                         {% for mode in ['Open', 'Split', 'Team'] %}
