@@ -216,6 +216,11 @@ def index():
             d_end = f" – {(start_dt + timedelta(hours=2, minutes=15)).strftime('%I:%M %p').lstrip('0')}"
         except: d_end = ""
 
+    # Session override: written by toggle_mode_direct to beat Airtable propagation lag
+    if 'forced_play_mode' in session:
+        play_mode = session.pop('forced_play_mode')
+        session.modified = True
+
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
     signup_recs = sorted(get_airtable_data("Signups"), key=sort_key)
@@ -940,13 +945,17 @@ def admin_action():
         new_mode = request.form.get('new_mode', 'Open')
         if new_mode not in ('Open', 'Split', 'Team'):
             new_mode = 'Open'
-        # Two separate patches so a Court Map field issue can't block the mode change
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+        # PATCH Play Mode first (critical) — separate call so Court Map can never block it
+        r = requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
             headers=HEADERS, json={"fields": {"Play Mode": new_mode}}, timeout=10)
-        try:
+        try:  # Court Map reset is best-effort
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
                 headers=HEADERS, json={"fields": {"Court Map": "{}"}}, timeout=10)
         except: pass
+        # Store in session so the redirect sees the new mode immediately,
+        # regardless of Airtable propagation timing
+        session['forced_play_mode'] = new_mode
+        session.modified = True
         AIRTABLE_CACHE.clear()
         flash(f"Switched to {new_mode} Mode.", "success")
         return redirect(url_for('index'))
@@ -1089,6 +1098,47 @@ def reorder():
 
     return redirect(url_for('index'))
 
+def get_saturday_weather(d_start='9:00 AM'):
+    """Fetch Saturday's weather from Open-Meteo (free, no API key).
+    Returns a short HTML string suitable for email, or empty string on failure."""
+    try:
+        lat, lon = "39.9936", "-105.0897"
+        url = (f"https://api.open-meteo.com/v1/forecast"
+               f"?latitude={lat}&longitude={lon}"
+               f"&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+               f"&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=16")
+        data = requests.get(url, timeout=10).json()
+
+        today = dt.date.today()
+        days_ahead = (5 - today.weekday()) % 7 or 7   # next Saturday
+        target = today + dt.timedelta(days=days_ahead)
+        target_iso = target.isoformat()
+
+        dates = data.get('daily', {}).get('time', [])
+        if target_iso not in dates:
+            return ""
+
+        idx      = dates.index(target_iso)
+        hi       = int(data['daily']['temperature_2m_max'][idx])
+        lo       = int(data['daily']['temperature_2m_min'][idx])
+        precip   = int(data['daily'].get('precipitation_probability_max', [0]*16)[idx] or 0)
+        wcode    = data['daily']['weathercode'][idx]
+        code_map = {
+            0: "☀️ Clear", 1: "🌤 Mostly Clear", 2: "⛅ Partly Cloudy", 3: "☁️ Overcast",
+            45: "🌫 Fog", 48: "🌫 Fog",
+            51: "🌦 Drizzle", 53: "🌦 Drizzle", 55: "🌧 Drizzle",
+            61: "🌧 Rain", 63: "🌧 Rain", 65: "🌧 Heavy Rain",
+            71: "🌨 Snow", 73: "🌨 Snow", 75: "❄️ Heavy Snow",
+            95: "⛈ Thunderstorm"
+        }
+        cond = code_map.get(wcode, "🌡 Varied")
+        rain_note = f", {precip}% chance of rain" if precip >= 20 else ""
+        return (f"<p>📅 <b>Saturday forecast</b> ({target.strftime('%b %d')}): "
+                f"{cond} | High {hi}°F, Low {lo}°F{rain_note}. "
+                f"<small><i>(via Open-Meteo, updated daily)</i></small></p>")
+    except:
+        return ""
+
 # === SECTION 7: CRON / AUTOMATION ===
 
 def _archive_and_clear_signups(settings, signups):
@@ -1173,10 +1223,17 @@ def cron_monday():
     # 3. Archive everyone (with their Level) and clear signups
     _archive_and_clear_signups(settings, signups)
             
-    # 4. Open signups for the new week
+    # 4. Open signups for the new week (include Saturday weather forecast)
     try:
+        weather_html = get_saturday_weather(d_start)
         emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        send_email(emails, f"🎾 Signups OPEN for {d_date}!", f"<h3>Signups are open!</h3><p><b>Time:</b> {d_start}</p><p>{mode_explanation}</p><p><a href='{SITE_URL}'>Claim your spot!</a></p>", is_multiple=True)
+        send_email(emails, f"🎾 Signups OPEN for {d_date}!",
+            f"<h3>Signups are open!</h3>"
+            f"<p><b>Time:</b> {d_start}</p>"
+            f"{weather_html}"
+            f"<p>{mode_explanation}</p>"
+            f"<p><a href='{SITE_URL}'>Claim your spot!</a></p>",
+            is_multiple=True)
     except: pass
         
     AIRTABLE_CACHE.clear()
