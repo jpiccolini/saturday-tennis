@@ -402,17 +402,46 @@ def index():
         court_map = {}
 
     else:  # Team
-        # Flatten all team-courts; auto-assign across courts 1-6; overrides keyed "T_1","T_2"…
-        team_court_sizes = [len(c) for team in team_list for c in team['courts']]
-        n_tc  = len(team_court_sizes)
+        # Team mode: allocate courts SEQUENTIALLY across all teams in display order.
+        # Jim P's 2 courts → 1, 2. Jim W's 1 court → 3. No heuristics about partial groups.
+        # T_N overrides (from Settings Court Map JSON) still work but are deduped.
         t_raw = {k[2:]: v for k, v in raw_map.items() if k.startswith('T_')}
-        flat  = build_court_map(n_tc, team_court_sizes, t_raw)
-        seq   = 1
-        team_court_map: dict = {}
+
+        # Build a flat list of (team_id, court_idx_1based, sequential_position)
+        slots = []
+        seq = 1
         for team in team_list:
             for ci in range(len(team['courts'])):
-                team_court_map[(team['team_id'], ci + 1)] = flat.get(seq, seq)
+                slots.append((team['team_id'], ci + 1, seq))
                 seq += 1
+
+        team_court_map: dict = {}
+        used: set = set()
+
+        # Pass 1: apply explicit T_N overrides (bounded 1–6, deduplicated)
+        for tid, court_idx, seq_num in slots:
+            override = t_raw.get(str(seq_num))
+            if override is not None:
+                try:
+                    phys = int(override)
+                    if 1 <= phys <= 6 and phys not in used:
+                        team_court_map[(tid, court_idx)] = phys
+                        used.add(phys)
+                except (ValueError, TypeError):
+                    pass
+
+        # Pass 2: fill remaining slots sequentially, skipping already-used courts
+        next_court = 1
+        for tid, court_idx, seq_num in slots:
+            if (tid, court_idx) in team_court_map:
+                continue
+            while next_court in used and next_court <= 6:
+                next_court += 1
+            physical = next_court if next_court <= 6 else seq_num
+            team_court_map[(tid, court_idx)] = physical
+            used.add(physical)
+            next_court += 1
+
         court_map       = team_court_map
         lower_court_map = {}
         upper_court_map = {}
