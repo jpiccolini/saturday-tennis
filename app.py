@@ -993,6 +993,17 @@ def team_update(team_id):
     court_count = max(1, min(2, int(request.form.get('court_count', 1))))
     confirmed, new_accounts, errors = _process_team_slots(user, request.form, court_count)
 
+    # If captain reduced court count, patch their record to reflect it
+    if my_rec:
+        old_app = int(float(my_rec['fields'].get('Approved Courts') or my_rec['fields'].get('Requested Courts') or 1))
+        if court_count < old_app:
+            try:
+                requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}",
+                    headers=HEADERS,
+                    json={"fields": {"Requested Courts": court_count, "Approved Courts": court_count}},
+                    timeout=10)
+            except: pass
+
     for p in confirmed:
         if p.get('is_captain'): continue   # captain record already exists
         try:
