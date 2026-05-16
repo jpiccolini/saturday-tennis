@@ -88,50 +88,53 @@ def next_player_code(master_list):
 def build_court_map(n_courts, group_sizes, overrides, prefix=''):
     """
     Auto-assign logical courts (1..n) to physical courts 1-6.
-    Courts 3 & 6 (end of each cluster) are preferred for partial groups (<4 players).
-    Courts 1-2, 4-5 (middle of each cluster) are preferred for full groups.
+    All full courts: sequential 1, 2, 3, 4...
+    Partial group present: that group gets court 3 or 6; full courts fill 1,2,4,5 then 3,6.
     overrides: {str(logical): int(physical)} from Settings JSON.
-    prefix: string prepended to override keys (e.g. 'T_' for Team mode).
-    Returns: {logical_int: physical_int}
     """
     if n_courts == 0:
         return {}
 
-    end_courts   = [3, 6]
-    mid_courts   = [1, 2, 4, 5]
-    all_courts   = [1, 2, 3, 4, 5, 6]
+    has_partial = any((group_sizes[i] if i < len(group_sizes) else 4) < 4
+                      for i in range(n_courts))
 
     assignment = {}
-    used = set()
 
-    # Pass 1: partial groups get end courts (3, then 6)
-    for i in range(n_courts):
-        size = group_sizes[i] if i < len(group_sizes) else 4
-        if size < 4:
-            for c in end_courts:
-                if c not in used:
-                    assignment[i + 1] = c
-                    used.add(c)
-                    break
+    if not has_partial:
+        # All full — simple sequential numbering
+        for i in range(n_courts):
+            assignment[i + 1] = i + 1
+    else:
+        end_courts = [3, 6]
+        all_courts = [1, 2, 3, 4, 5, 6]
+        used: set = set()
 
-    # Pass 2: full groups fill middle courts first, then whatever's left
-    for i in range(n_courts):
-        if (i + 1) not in assignment:
-            for c in mid_courts + end_courts + all_courts:
-                if c not in used:
-                    assignment[i + 1] = c
-                    used.add(c)
-                    break
+        # Pass 1: partial groups get end courts
+        for i in range(n_courts):
+            size = group_sizes[i] if i < len(group_sizes) else 4
+            if size < 4:
+                for c in end_courts:
+                    if c not in used:
+                        assignment[i + 1] = c
+                        used.add(c)
+                        break
 
-    # Apply admin overrides (stored as prefix+str(logical) → physical)
+        # Pass 2: full groups fill sequentially, skipping claimed end courts
+        remaining = [c for c in all_courts if c not in used]
+        idx = 0
+        for i in range(n_courts):
+            if (i + 1) not in assignment and idx < len(remaining):
+                assignment[i + 1] = remaining[idx]
+                idx += 1
+
+    # Apply admin overrides
     for k, v in overrides.items():
-        if prefix:
-            if not k.startswith(prefix):
-                continue
-            k = k[len(prefix):]
+        if prefix and not str(k).startswith(prefix):
+            continue
+        key = str(k)[len(prefix):] if prefix else str(k)
         try:
-            assignment[int(k)] = int(v)
-        except:
+            assignment[int(key)] = int(v)
+        except (ValueError, TypeError):
             pass
 
     return assignment
