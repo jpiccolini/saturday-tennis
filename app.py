@@ -524,12 +524,35 @@ def signup():
         flash("You are already signed up!", "warning")
         return redirect(url_for('index'))
 
+    # Snapshot the roster BEFORE adding so we can detect who moves off the waitlist
+    pre_signups  = sorted(get_airtable_data("Signups"), key=sort_key)
+    old_total    = len(pre_signups)
+    old_cutoff   = (min(old_total, 24) // 4) * 4
+
     payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email'], "Level": user['level']}}
     try:
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload).raise_for_status()
         AIRTABLE_CACHE.clear()
         log_activity(user['first'], "Signed Up")
         flash("You've been added to the list!", "success")
+
+        # Notify waitlisted players who just moved to playing (new court opened)
+        new_total  = old_total + 1
+        new_cutoff = (min(new_total, 24) // 4) * 4
+        if new_cutoff > old_cutoff:
+            # Players at positions old_cutoff … new_cutoff-1 (0-indexed) just moved up
+            newly_playing = pre_signups[old_cutoff:new_cutoff]
+            for r in newly_playing:
+                email = r['fields'].get('Email')
+                first = r['fields'].get('First', 'Player')
+                if email:
+                    try:
+                        send_email(email, "🎾 Great news — you're now Playing!",
+                            f"<p>Hi {first}! A new court just opened and you've moved from "
+                            f"the waitlist to the <b>playing roster</b> for this Saturday.</p>"
+                            f"<p>Check the updated roster at <a href='{SITE_URL}'>{SITE_URL}</a></p>"
+                            f"<p>See you Saturday! 🎾</p>")
+                    except: pass
     except:
         flash("Error saving signup to the database. Please try again or contact Jim.", "danger")
     return redirect(url_for('index'))
@@ -1424,7 +1447,16 @@ def cron_monday():
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
-    
+
+    # Skip Next Reset: if checked, do nothing this week and uncheck for next time
+    if settings and settings[0]['fields'].get('Skip Next Reset'):
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                headers=HEADERS, json={"fields": {"Skip Next Reset": False}})
+        except: pass
+        log_activity("Cron", f"Monday cron skipped (Skip Next Reset was set) for {d_date}")
+        return "Skipped — no reset this week.", 200
+
     mode_descriptions = {
         'Open':  "This week we are in <b>Open</b> mode — sign up individually, first come first served across all available courts.",
         'Split': "This week we are in <b>Split</b> mode, with 3 courts reserved for each skill group. "
@@ -1437,14 +1469,21 @@ def cron_monday():
     }
     mode_explanation = mode_descriptions.get(play_mode, mode_descriptions['Open'])
 
-    # Week Note: if set in Settings, prepend it (for special introductions like Team Mode launch)
+    # Week Note: prepend custom intro, clear after use
     week_note = settings[0]['fields'].get('Week Note', '').strip() if settings else ''
     if week_note:
         mode_explanation = f"{week_note}<br><br>{mode_explanation}"
-        # Clear the note so it doesn't repeat next week
         try:
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
                 headers=HEADERS, json={"fields": {"Week Note": ""}})
+        except: pass
+
+    # Email Subject Override: replaces "Signups OPEN for {date}", clears after use
+    email_subject_override = settings[0]['fields'].get('Email Subject', '').strip() if settings else ''
+    if email_subject_override:
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                headers=HEADERS, json={"fields": {"Email Subject": ""}})
         except: pass
 
     signups = get_airtable_data("Signups", sort_field="Created Time")
@@ -1478,9 +1517,10 @@ def cron_monday():
     try:
         weather_html = get_saturday_weather(d_start)
         emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        send_email(emails, f"🎾 Signups OPEN for {d_date}!",
+        subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
+        send_email(emails, subject,
             f"<h3>Signups are open!</h3>"
-            f"<p><b>Time:</b> {d_start}</p>"
+            f"<p><b>Date:</b> {d_date} &nbsp;|&nbsp; <b>Time:</b> {d_start}</p>"
             f"{weather_html}"
             f"<p>{mode_explanation}</p>"
             f"<p><a href='{SITE_URL}'>Claim your spot!</a></p>",
