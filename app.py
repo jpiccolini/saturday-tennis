@@ -1448,14 +1448,14 @@ def cron_monday():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
 
-    # Skip Next Reset: if checked, do nothing this week and uncheck for next time
-    if settings and settings[0]['fields'].get('Skip Next Reset'):
+    # Skip Next Reset: skip the archive/clear but still send reminder if Week Note is set
+    skip_reset = settings[0]['fields'].get('Skip Next Reset', False) if settings else False
+    if skip_reset:
         try:
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
                 headers=HEADERS, json={"fields": {"Skip Next Reset": False}})
         except: pass
-        log_activity("Cron", f"Monday cron skipped (Skip Next Reset was set) for {d_date}")
-        return "Skipped — no reset this week.", 200
+        log_activity("Cron", f"Monday roster reset skipped for {d_date}")
 
     mode_descriptions = {
         'Open':  "This week we are in <b>Open</b> mode — sign up individually, first come first served across all available courts.",
@@ -1487,43 +1487,44 @@ def cron_monday():
         except: pass
 
     signups = get_airtable_data("Signups", sort_field="Created Time")
-    
-    # 1. Calculate the number of each rating that actually PLAYED (ignores waitlist)
-    played_levels = {}
-    if play_mode == 'Split':
-        lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
-        upper = [s for s in signups if s['fields'].get('Level') == '4.0/4.5']
-        l_cutoff = (min(len(lower), 12) // 4) * 4
-        u_cutoff = (min(len(upper), 12) // 4) * 4
-        playing_recs = lower[:l_cutoff] + upper[:u_cutoff]
-    else:
-        playing_cutoff = (min(len(signups), 24) // 4) * 4
-        playing_recs = signups[:playing_cutoff]
 
-    for r in playing_recs:
-        lvl = r['fields'].get('Level', 'Unrated')
-        played_levels[lvl] = played_levels.get(lvl, 0) + 1
+    if not skip_reset:
+        # 1. Calculate stats for players who actually played
+        played_levels = {}
+        if play_mode == 'Split':
+            lower = [s for s in signups if s['fields'].get('Level') == '3.0/3.5']
+            upper = [s for s in signups if s['fields'].get('Level') == '4.0/4.5']
+            l_cutoff = (min(len(lower), 12) // 4) * 4
+            u_cutoff = (min(len(upper), 12) // 4) * 4
+            playing_recs = lower[:l_cutoff] + upper[:u_cutoff]
+        else:
+            playing_cutoff = (min(len(signups), 24) // 4) * 4
+            playing_recs = signups[:playing_cutoff]
 
-    # 2. Log stats and Email Admin
-    stats_msg = " | ".join([f"{k}: {v} players" for k, v in played_levels.items()])
-    if stats_msg:
-        log_activity("Weekly Play Stats", f"Played on {d_date} -> {stats_msg}")
-        send_email(ADMIN_EMAIL, f"📊 Weekly Stats for {d_date}", f"<p>Here is the breakdown of ratings that made the cutoff and played this past Saturday:</p><h3>{stats_msg}</h3>")
+        for r in playing_recs:
+            lvl = r['fields'].get('Level', 'Unrated')
+            played_levels[lvl] = played_levels.get(lvl, 0) + 1
 
-    # 3. Archive everyone (with their Level) and clear signups
-    _archive_and_clear_signups(settings, signups)
-            
-    # 4. Open signups for the new week (include Saturday weather forecast)
+        # 2. Log stats and email admin
+        stats_msg = " | ".join([f"{k}: {v} players" for k, v in played_levels.items()])
+        if stats_msg:
+            log_activity("Weekly Play Stats", f"Played on {d_date} -> {stats_msg}")
+            send_email(ADMIN_EMAIL, f"📊 Weekly Stats for {d_date}", f"<p>Here is the breakdown of ratings that made the cutoff and played this past Saturday:</p><h3>{stats_msg}</h3>")
+
+        # 3. Archive everyone and clear signups
+        _archive_and_clear_signups(settings, signups)
+
+    # 4. Send the weekly email (signup-open OR reminder if skip_reset)
     try:
         weather_html = get_saturday_weather(d_start)
         emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
         subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
         send_email(emails, subject,
-            f"<h3>Signups are open!</h3>"
+            f"<h3>{'Reminder' if skip_reset else 'Signups are open'}!</h3>"
             f"<p><b>Date:</b> {d_date} &nbsp;|&nbsp; <b>Time:</b> {d_start}</p>"
             f"{weather_html}"
             f"<p>{mode_explanation}</p>"
-            f"<p><a href='{SITE_URL}'>Claim your spot!</a></p>",
+            f"<p><a href='{SITE_URL}'>{'View the roster' if skip_reset else 'Claim your spot'}</a></p>",
             is_multiple=True)
     except: pass
         
