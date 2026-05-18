@@ -1537,6 +1537,22 @@ def cron_friday():
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
+
+    # Bye week: skip lock-in, send a heads-up instead. Leave the flag for Monday to uncheck.
+    if settings and settings[0]['fields'].get('Skip Next Reset'):
+        master_list = get_airtable_data("Master List")
+        all_emails  = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+        send_email(all_emails,
+            f"🎾 No tennis this Saturday — see you {d_date}!",
+            f"<p>Hi everyone! Just a quick note: <b>there is no session this Saturday.</b></p>"
+            f"<p>Our next courts are on <b>{d_date} at {d_start}</b>. "
+            f"If you haven't signed up yet, log in and grab your spot — "
+            f"people are already planning ahead.</p>"
+            f"<p><a href='{SITE_URL}'>View the roster</a></p>"
+            f"<p>See you on {d_date}! 🎾</p>",
+            is_multiple=True)
+        log_activity("Cron", f"Friday bye-week notice sent — next date {d_date}")
+        return "Bye-week notice sent, no lock-in.", 200
     
     signups = get_airtable_data("Signups", sort_field="Created Time")
     master_list = get_airtable_data("Master List")
