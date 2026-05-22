@@ -143,16 +143,33 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
 AIRTABLE_CACHE = {}
 PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
 MAINTENANCE_MODE = False    # when True, only admin can sign up or create teams
-CACHE_TTL = 300       # cache successful fetches for 5 min — well within Airtable Team plan quota
+
+# Per-table cache TTLs — static tables cache longer to reduce API calls
+CACHE_TTL_MAP = {
+    'Settings':    3600,   # changes only when admin updates date/mode (~weekly)
+    'Master List': 3600,   # changes only when new member approved (~monthly)
+    'Signups':     300,    # changes during signup window (5 min)
+    'Applicants':  300,
+    'Archive':     300,
+    'Logs':        300,
+}
+CACHE_TTL = 300  # fallback for any table not in the map
+
+def invalidate(table_name):
+    """Clear only the cache entries for a specific table."""
+    for k in [k for k in AIRTABLE_CACHE if k.startswith(table_name)]:
+        del AIRTABLE_CACHE[k]
+CACHE_TTL = 300       # default fallback TTL
 ERROR_CACHE_TTL = 30  # on failure, hold the empty/stale result for 30s before retrying
 
 def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formula=None):
     current_time = time.time()
     cache_key = f"{table_name}_{sort_field}_{direction}_{filter_formula}"
+    ttl = CACHE_TTL_MAP.get(table_name, CACHE_TTL)
 
     if cache_key in AIRTABLE_CACHE:
         cached_time, cached_data = AIRTABLE_CACHE[cache_key]
-        if current_time - cached_time < CACHE_TTL:
+        if current_time - cached_time < ttl:
             return cached_data
 
     records = []
@@ -532,7 +549,7 @@ def signup():
     payload = {"fields": {"First": user['first'], "Last": user['last'], "Player Code": str(user['code']), "Email": user['email'], "Level": user['level']}}
     try:
         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json=payload).raise_for_status()
-        AIRTABLE_CACHE.clear()
+        invalidate('Signups')   # only Signups changed — Settings and Master List stay cached
         log_activity(user['first'], "Signed Up")
         flash("You've been added to the list!", "success")
 
@@ -606,7 +623,7 @@ def cancel():
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{my_rec['id']}", headers=HEADERS)
         log_activity(session['user']['first'], "Cancelled")
     
-    AIRTABLE_CACHE.clear()
+    invalidate('Signups')   # only Signups changed
     return redirect(url_for('index'))
 
 @app.route('/accept_sub', methods=['POST'])
@@ -621,7 +638,7 @@ def accept_sub():
         dropper_name = dropper['fields'].get('First')
         requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{dropper['id']}", headers=HEADERS)
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{me['id']}", headers=HEADERS, json={"fields": {"Label": f"SUB for {dropper_name}"}})
-        AIRTABLE_CACHE.clear()
+        invalidate('Signups')   # only Signups changed
         flash("You successfully accepted the sub spot!", "success")
     return redirect(url_for('index'))
 
@@ -646,7 +663,7 @@ def update_profile():
         except: pass 
         session['user'].update({'email': new_email, 'phone': new_phone, 'contact_confirmed': True, 'level': new_level or user.get('level')})
         session.modified = True
-        AIRTABLE_CACHE.clear()
+        invalidate('Master List')   # only Master List changed
         flash("Profile updated! Site unlocked.", "success")
     return redirect(url_for('index'))
 
@@ -1443,6 +1460,7 @@ def get_ordinal(n):
 
 @app.route('/cron/monday')
 def cron_monday():
+    invalidate('Settings')   # always read fresh — Week Note, Skip Next Reset, etc. must not be cached
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
@@ -1533,6 +1551,7 @@ def cron_monday():
 
 @app.route('/cron/friday')
 def cron_friday():
+    invalidate('Settings')   # always read fresh — cron flags (Skip Next Reset) must not be cached
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
