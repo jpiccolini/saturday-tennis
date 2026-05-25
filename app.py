@@ -466,6 +466,19 @@ def index():
         lower_court_map = {}
         upper_court_map = {}
 
+    # Gap-week guardrail: warn admin if Target Date is far out but the roster has players.
+    # This catches the scenario where Target Date was set wrong during a gap week —
+    # the Monday cron would purge the roster if left uncorrected.
+    gap_week_warning = False
+    days_until_target = None
+    try:
+        _target_dt = dt.datetime.strptime(d_date, "%B %d, %Y").date()
+        days_until_target = (_target_dt - dt.date.today()).days
+        if days_until_target > 7 and total_signups > 0:
+            gap_week_warning = True
+    except (ValueError, AttributeError):
+        pass
+
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster,
                            applicants=applicants, guest_requests=guest_requests, master_list=master_recs,
                            user_on_roster=user_on_roster, waitlist_pos=waitlist_pos, weather=weather_info,
@@ -474,7 +487,8 @@ def index():
                            upper_roster=upper_roster, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff,
                            show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
                            court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
-                           pending_teams=pending_teams, maintenance_mode=MAINTENANCE_MODE)
+                           pending_teams=pending_teams, maintenance_mode=MAINTENANCE_MODE,
+                           gap_week_warning=gap_week_warning, days_until_target=days_until_target)
 
 @app.route('/validate', methods=['POST'])
 def validate():
