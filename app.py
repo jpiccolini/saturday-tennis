@@ -1185,6 +1185,63 @@ def maintenance_off():
     return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
+@app.route('/restore_archive')
+def restore_archive():
+    """Admin-only: re-create Signups from Archive records matching the current Target Date."""
+    user = session.get('user')
+    if not user or not user.get('is_admin'):
+        return "Unauthorized", 403
+
+    settings  = get_airtable_data("Settings")
+    target    = settings[0]['fields'].get('Target Date', '') if settings else ''
+    if not target:
+        flash("No Target Date set in Settings.", "danger")
+        return redirect(url_for('index'))
+
+    # Fetch Archive records for this date
+    formula   = f"{{Date}}='{target}'"
+    archived  = get_airtable_data("Archive", filter_formula=formula)
+    if not archived:
+        flash(f"No archived records found for '{target}'.", "warning")
+        return redirect(url_for('index'))
+
+    # Build a code→email lookup from Master List
+    master    = get_airtable_data("Master List")
+    code_email = {}
+    for m in master:
+        c = str(m['fields'].get('Code', '')).replace('.0', '').strip()
+        code_email[c] = m['fields'].get('Email', '')
+
+    added = 0
+    skipped = 0
+    for r in archived:
+        f = r['fields']
+        code  = str(f.get('Player Code', '')).replace('.0', '').strip()
+        first = f.get('First', '')
+        last  = f.get('Last', '')
+        level = f.get('Level', '')
+        email = code_email.get(code, '')
+        if not first or not code:
+            skipped += 1
+            continue
+        try:
+            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
+                headers=HEADERS,
+                json={"fields": {
+                    "First": first, "Last": last,
+                    "Player Code": code, "Email": email, "Level": level
+                }}, timeout=10)
+            added += 1
+        except Exception as e:
+            skipped += 1
+
+    invalidate('Signups')
+    log_activity("Admin", f"Restored {added} signups from Archive for {target}")
+    flash(f"Restored {added} player(s) from Archive for {target}."
+          + (f" {skipped} skipped (missing data)." if skipped else ""), "success")
+    return redirect(url_for('index'))
+
+
 def admin_action():
     global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE   # declare at top — Python 3.14 requires this
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -1466,8 +1523,17 @@ def cron_monday():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
 
-    # Skip Next Reset: skip the archive/clear but still send reminder if Week Note is set
+    # Skip Next Reset: manual override OR auto-detect bye weeks
+    # Auto-detect: if Target Date is more than 7 days away, this is a gap week — never purge
     skip_reset = settings[0]['fields'].get('Skip Next Reset', False) if settings else False
+    if not skip_reset:
+        try:
+            target = dt.datetime.strptime(d_date, "%B %d, %Y").date()
+            days_until = (target - dt.date.today()).days
+            if days_until > 7:
+                skip_reset = True
+                log_activity("Cron", f"Auto-skip: {d_date} is {days_until} days away — no reset")
+        except: pass
     if skip_reset:
         try:
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
@@ -1557,8 +1623,16 @@ def cron_friday():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
 
-    # Bye week: skip lock-in, send a heads-up instead. Leave the flag for Monday to uncheck.
-    if settings and settings[0]['fields'].get('Skip Next Reset'):
+    # Bye week: manual flag OR auto-detect (Target Date > 7 days away)
+    skip_friday = settings[0]['fields'].get('Skip Next Reset', False) if settings else False
+    if not skip_friday:
+        try:
+            target = dt.datetime.strptime(d_date, "%B %d, %Y").date()
+            if (target - dt.date.today()).days > 7:
+                skip_friday = True
+                log_activity("Cron", f"Auto-skip Friday: {d_date} is a future session")
+        except: pass
+    if skip_friday:
         master_list = get_airtable_data("Master List")
         all_emails  = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
         send_email(all_emails,
