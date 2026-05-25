@@ -1206,8 +1206,8 @@ def wipe_signups():
 
 @app.route('/restore_archive')
 def restore_archive():
-    """Admin-only: restore Signups from the most recent Archive batch for the current Target Date.
-    'Most recent batch' = all records created within 30 min of the latest createdTime for that date."""
+    """Admin-only: wipe Signups and restore from the most recent Archive batch for
+    the current Target Date, preserving original signup order via Manual Order field."""
     user = session.get('user')
     if not user or not user.get('is_admin'):
         return "Unauthorized", 403
@@ -1218,59 +1218,72 @@ def restore_archive():
         flash("No Target Date set in Settings.", "danger")
         return redirect(url_for('index'))
 
-    # Fetch all Archive records for this date
+    # --- Find the correct Archive batch ---
     formula  = f"{{Date}}='{target}'"
     archived = get_airtable_data("Archive", filter_formula=formula)
     if not archived:
         flash(f"No archived records found for '{target}'.", "warning")
         return redirect(url_for('index'))
 
-    # Find the most recent batch: group by createdTime within 30-minute windows
     import datetime as dt2
     def parse_ct(r):
         try:
             return dt2.datetime.fromisoformat(r.get('createdTime','').replace('Z','+00:00'))
-        except: return dt2.datetime.min.replace(tzinfo=dt2.timezone.utc)
+        except:
+            return dt2.datetime.min.replace(tzinfo=dt2.timezone.utc)
 
+    # Most recent batch = records within 30 min of the latest createdTime
     archived.sort(key=parse_ct, reverse=True)
-    latest_time = parse_ct(archived[0])
-    cutoff      = latest_time - dt2.timedelta(minutes=30)
-    batch       = [r for r in archived if parse_ct(r) >= cutoff]
+    latest   = parse_ct(archived[0])
+    cutoff   = latest - dt2.timedelta(minutes=30)
+    batch    = [r for r in archived if parse_ct(r) >= cutoff]
 
-    # Build code→email from Master List
+    # Sort batch oldest→newest to recover original signup order
+    batch.sort(key=parse_ct)
+
+    # --- Step 1: wipe current Signups ---
+    existing = get_airtable_data("Signups")
+    for r in existing:
+        try:
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}",
+                headers=HEADERS, timeout=10)
+        except: pass
+
+    # --- Step 2: restore in order, setting Manual Order to lock sequence ---
     master     = get_airtable_data("Master List")
     code_email = {str(m['fields'].get('Code','')).replace('.0','').strip(): m['fields'].get('Email','')
                   for m in master}
 
-    # Build existing signup codes so we don't create duplicates
-    existing_codes = {str(r['fields'].get('Player Code','')).replace('.0','').strip()
-                      for r in get_airtable_data("Signups")}
-
     added = 0
     skipped = 0
-    for r in batch:
+    for order_num, r in enumerate(batch, start=1):
         f     = r['fields']
         code  = str(f.get('Player Code','')).replace('.0','').strip()
         first = f.get('First','')
         last  = f.get('Last','')
         level = f.get('Level','')
         email = code_email.get(code,'')
-        if not first or not code or code in existing_codes:
+        if not first or not code:
             skipped += 1
             continue
         try:
             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
                 headers=HEADERS,
-                json={"fields": {"First": first, "Last": last,
-                                 "Player Code": code, "Email": email, "Level": level}},
-                timeout=10)
+                json={"fields": {
+                    "First": first, "Last": last,
+                    "Player Code": code, "Email": email, "Level": level,
+                    "Manual Order": order_num
+                }}, timeout=10)
             added += 1
-        except: skipped += 1
+        except:
+            skipped += 1
 
     invalidate('Signups')
-    log_activity("Admin", f"Restored {added} from Archive batch ({latest_time.strftime('%b %d %H:%M UTC')}) for {target}")
-    flash(f"Restored {added} player(s) from the {latest_time.strftime('%b %d %H:%M UTC')} batch"
-          + (f" ({skipped} skipped)." if skipped else "."), "success")
+    batch_time = latest.astimezone(dt2.timezone(dt2.timedelta(hours=-6))).strftime('%b %d %I:%M %p MT')
+    log_activity("Admin", f"Clean restore: wiped + restored {added} in order from {batch_time} batch for {target}")
+    flash(f"Wiped and restored {added} player(s) in original signup order "
+          f"(batch from {batch_time})."
+          + (f" {skipped} skipped." if skipped else ""), "success")
     return redirect(url_for('index'))
 
 
