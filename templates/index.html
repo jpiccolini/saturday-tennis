@@ -105,6 +105,20 @@
                                 <div class="p-3 mb-3 text-start admin-sidebar-box">
                                     <p class="text-danger fw-bold text-center border-bottom border-danger pb-2">ADMIN SIDEBAR</p>
 
+                                    {% if gap_week_warning %}
+                                    <div class="alert alert-warning border-warning border-2 mb-3 p-2" style="background:#fff3cd;">
+                                        <div class="fw-bold text-center" style="font-size:0.85rem;">⚠️ GAP WEEK — ROSTER NOT EMPTY</div>
+                                        <div class="text-center" style="font-size:0.8rem;">
+                                            <strong>{{ total_signups }} player{{ 's' if total_signups != 1 else '' }}</strong>
+                                            on roster &amp; <strong>{{ days_until_target }} days</strong> until {{ target_date }}.
+                                        </div>
+                                        <div class="text-center mt-1" style="font-size:0.75rem; color:#856404;">
+                                            If this is a gap week, verify Target Date is correct.<br>
+                                            A wrong date will trigger a Monday purge.
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
                                     <form action="/admin_action" method="POST" class="mb-3">
                                         <input type="hidden" name="action" value="toggle_maintenance">
                                         <button class="btn btn-sm w-100 fw-bold {% if maintenance_mode %}btn-danger{% else %}btn-outline-secondary{% endif %}">
