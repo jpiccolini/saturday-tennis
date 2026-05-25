@@ -1185,61 +1185,91 @@ def maintenance_off():
     return redirect(url_for('index'))
 
 @app.route('/admin_action', methods=['POST'])
+@app.route('/wipe_signups')
+def wipe_signups():
+    """Admin-only: delete ALL current Signups without archiving or emailing. Use before restore."""
+    user = session.get('user')
+    if not user or not user.get('is_admin'):
+        return "Unauthorized", 403
+    recs = get_airtable_data("Signups")
+    deleted = 0
+    for r in recs:
+        try:
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{r['id']}",
+                headers=HEADERS, timeout=10)
+            deleted += 1
+        except: pass
+    invalidate('Signups')
+    log_activity("Admin", f"Wiped {deleted} Signups records (no archive)")
+    flash(f"Cleared {deleted} Signups records. Now run /restore_archive to restore.", "success")
+    return redirect(url_for('index'))
+
+
 @app.route('/restore_archive')
 def restore_archive():
-    """Admin-only: re-create Signups from Archive records matching the current Target Date."""
+    """Admin-only: restore Signups from the most recent Archive batch for the current Target Date.
+    'Most recent batch' = all records created within 30 min of the latest createdTime for that date."""
     user = session.get('user')
     if not user or not user.get('is_admin'):
         return "Unauthorized", 403
 
-    settings  = get_airtable_data("Settings")
-    target    = settings[0]['fields'].get('Target Date', '') if settings else ''
+    settings = get_airtable_data("Settings")
+    target   = settings[0]['fields'].get('Target Date', '') if settings else ''
     if not target:
         flash("No Target Date set in Settings.", "danger")
         return redirect(url_for('index'))
 
-    # Fetch Archive records for this date
-    formula   = f"{{Date}}='{target}'"
-    archived  = get_airtable_data("Archive", filter_formula=formula)
+    # Fetch all Archive records for this date
+    formula  = f"{{Date}}='{target}'"
+    archived = get_airtable_data("Archive", filter_formula=formula)
     if not archived:
         flash(f"No archived records found for '{target}'.", "warning")
         return redirect(url_for('index'))
 
-    # Build a code→email lookup from Master List
-    master    = get_airtable_data("Master List")
-    code_email = {}
-    for m in master:
-        c = str(m['fields'].get('Code', '')).replace('.0', '').strip()
-        code_email[c] = m['fields'].get('Email', '')
+    # Find the most recent batch: group by createdTime within 30-minute windows
+    import datetime as dt2
+    def parse_ct(r):
+        try:
+            return dt2.datetime.fromisoformat(r.get('createdTime','').replace('Z','+00:00'))
+        except: return dt2.datetime.min.replace(tzinfo=dt2.timezone.utc)
+
+    archived.sort(key=parse_ct, reverse=True)
+    latest_time = parse_ct(archived[0])
+    cutoff      = latest_time - dt2.timedelta(minutes=30)
+    batch       = [r for r in archived if parse_ct(r) >= cutoff]
+
+    # Build code→email from Master List
+    master     = get_airtable_data("Master List")
+    code_email = {str(m['fields'].get('Code','')).replace('.0','').strip(): m['fields'].get('Email','')
+                  for m in master}
 
     added = 0
     skipped = 0
-    for r in archived:
-        f = r['fields']
-        code  = str(f.get('Player Code', '')).replace('.0', '').strip()
-        first = f.get('First', '')
-        last  = f.get('Last', '')
-        level = f.get('Level', '')
-        email = code_email.get(code, '')
+    for r in batch:
+        f     = r['fields']
+        code  = str(f.get('Player Code','')).replace('.0','').strip()
+        first = f.get('First','')
+        last  = f.get('Last','')
+        level = f.get('Level','')
+        email = code_email.get(code,'')
         if not first or not code:
             skipped += 1
             continue
         try:
             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups",
                 headers=HEADERS,
-                json={"fields": {
-                    "First": first, "Last": last,
-                    "Player Code": code, "Email": email, "Level": level
-                }}, timeout=10)
+                json={"fields": {"First": first, "Last": last,
+                                 "Player Code": code, "Email": email, "Level": level}},
+                timeout=10)
             added += 1
-        except Exception as e:
-            skipped += 1
+        except: skipped += 1
 
     invalidate('Signups')
-    log_activity("Admin", f"Restored {added} signups from Archive for {target}")
-    flash(f"Restored {added} player(s) from Archive for {target}."
-          + (f" {skipped} skipped (missing data)." if skipped else ""), "success")
+    log_activity("Admin", f"Restored {added} from Archive batch ({latest_time.strftime('%b %d %H:%M UTC')}) for {target}")
+    flash(f"Restored {added} player(s) from the {latest_time.strftime('%b %d %H:%M UTC')} batch"
+          + (f" ({skipped} skipped)." if skipped else "."), "success")
     return redirect(url_for('index'))
+
 
 
 def admin_action():
