@@ -1184,7 +1184,6 @@ def maintenance_off():
     flash("✅ Maintenance mode OFF — signups open to everyone.", "success")
     return redirect(url_for('index'))
 
-@app.route('/admin_action', methods=['POST'])
 @app.route('/wipe_signups')
 def wipe_signups():
     """Admin-only: delete ALL current Signups without archiving or emailing. Use before restore."""
@@ -1243,6 +1242,10 @@ def restore_archive():
     code_email = {str(m['fields'].get('Code','')).replace('.0','').strip(): m['fields'].get('Email','')
                   for m in master}
 
+    # Build existing signup codes so we don't create duplicates
+    existing_codes = {str(r['fields'].get('Player Code','')).replace('.0','').strip()
+                      for r in get_airtable_data("Signups")}
+
     added = 0
     skipped = 0
     for r in batch:
@@ -1252,7 +1255,7 @@ def restore_archive():
         last  = f.get('Last','')
         level = f.get('Level','')
         email = code_email.get(code,'')
-        if not first or not code:
+        if not first or not code or code in existing_codes:
             skipped += 1
             continue
         try:
@@ -1272,6 +1275,7 @@ def restore_archive():
 
 
 
+@app.route('/admin_action', methods=['POST'])
 def admin_action():
     global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE   # declare at top — Python 3.14 requires this
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
