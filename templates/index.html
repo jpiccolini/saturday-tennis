@@ -268,9 +268,22 @@
                         <div class="card-body text-center">
                             <form action="/validate" method="POST">
                                 <div class="mb-3 text-start"><label class="form-label small fw-bold">4-Digit Code</label><input type="number" name="code" class="form-control form-control-lg" required></div>
-                                <div class="mb-3 text-start"><label class="form-label small fw-bold">Admin Password</label><input type="password" name="password" class="form-control"></div>
+                                <div class="mb-3 text-start" id="adminPwSection" style="display:none;"><label class="form-label small fw-bold">Admin Password</label><input type="password" name="password" class="form-control" id="adminPwInput"></div>
                                 <button type="submit" class="btn btn-primary w-100 fw-bold">Enter</button>
                             </form>
+                            <div class="text-center mt-1">
+                                <a href="#" id="adminToggle" class="text-muted" style="font-size:0.7rem; text-decoration:none; opacity:0.4;">admin</a>
+                            </div>
+                            <script>
+                            document.getElementById('adminToggle').addEventListener('click', function(e) {
+                                e.preventDefault();
+                                var section = document.getElementById('adminPwSection');
+                                var input   = document.getElementById('adminPwInput');
+                                var visible = section.style.display !== 'none';
+                                section.style.display = visible ? 'none' : '';
+                                if (!visible) input.focus();
+                            });
+                            </script>
                             <hr>
                             <p class="mb-0">New here?</p>
                             <button class="btn btn-link text-success fw-bold p-0" data-bs-toggle="collapse" data-bs-target="#applyForm">Apply to Join the Gang</button>
