@@ -23,7 +23,8 @@ app.secret_key = os.environ.get("FLASK_SECRET", "tennis-secret-123")
 # === SECTION 1: SETUP & CONFIG ===
 API_KEY = os.environ.get("AIRTABLE_API_KEY")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "").strip()
-ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
+_raw_admin_pw = os.environ.get("ADMIN_PASSWORD", "jujubeE2")
+ADMIN_PWS = {p.strip() for p in _raw_admin_pw.split(',') if p.strip()}
 W_KEY = os.environ.get("WEATHER_API_KEY") # No longer strictly needed for Open-Meteo, kept for legacy
 FROM_EMAIL = os.environ.get("FROM_EMAIL") 
 GMAIL_PW = os.environ.get("GMAIL_PASSWORD") 
@@ -504,7 +505,7 @@ def validate():
             break
     
     if user_rec:
-        is_admin = (password == ADMIN_PW)
+        is_admin = bool(password and password in ADMIN_PWS)
         f = user_rec['fields']
         last_confirmed_str = f.get('Last Confirmed')
         contact_confirmed = False
@@ -1747,6 +1748,40 @@ def cron_friday():
         send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend:</p><p><b>{big_picture}</b></p><p>If you can play, jump in and help us fill out the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
         
     return "Friday reminder emails sent successfully.", 200
+
+
+# ── Calendar page (login required) ──────────────────────────────────────────
+@app.route('/calendar')
+def calendar_page():
+    if not session.get('user'):
+        return redirect(url_for('index'))
+    return render_template('calendar.html')
+
+# ── Admin guide (admin only) ─────────────────────────────────────────────────
+@app.route('/admin_guide')
+def admin_guide():
+    if not session.get('user') or not session['user'].get('is_admin'):
+        flash("Admin access required.", "danger")
+        return redirect(url_for('index'))
+    return render_template('admin_guide.html')
+
+# ── Admin: remove a player from the roster ───────────────────────────────────
+@app.route('/admin_remove_player', methods=['POST'])
+def admin_remove_player():
+    if not session.get('user') or not session['user'].get('is_admin'):
+        return "Unauthorized", 403
+    signup_id   = request.form.get('signup_id')
+    player_name = request.form.get('player_name', 'Player')
+    if signup_id:
+        try:
+            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Signups/{signup_id}",
+                            headers=HEADERS, timeout=10)
+            invalidate('Signups')
+            log_activity("Admin", f"Removed {player_name} from roster")
+            flash(f"{player_name} removed from roster.", "success")
+        except Exception as e:
+            flash(f"Remove failed: {e}", "danger")
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True)
