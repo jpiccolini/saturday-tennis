@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Guide – Saturday Tennis Gang</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .section-card { border-left: 4px solid #dc3545; }
+        .step-num { background: #dc3545; color: white; border-radius: 50%; width: 22px; height: 22px;
+                    display: inline-flex; align-items: center; justify-content: center;
+                    font-size: 0.75rem; font-weight: bold; flex-shrink: 0; }
+    </style>
+</head>
+<body>
+<div class="container py-4" style="max-width: 800px;">
+
+    <div class="text-center mb-4">
+        <h1 class="display-6 fw-bold text-danger">🛠 Admin Guide</h1>
+        <h5 class="text-secondary">Saturday Tennis Gang — Admin Reference</h5>
+        <div class="mt-1 mb-2">
+            <span class="badge bg-danger me-1">Jim Piccolini</span>
+            <span class="badge bg-primary">Marc Levinson</span>
+        </div>
+        <a href="/" class="btn btn-sm btn-outline-secondary">← Back to Roster</a>
+    </div>
+
+    <div class="alert alert-warning border-warning shadow-sm mb-4">
+        <strong>⚠️ Admin access is confidential.</strong> Do not share your password. All admin actions are logged.
+    </div>
+
+    <!-- TABLE OF CONTENTS -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header fw-bold bg-light">📋 Contents</div>
+        <div class="card-body py-2">
+            <div class="row">
+                <div class="col-md-6">
+                    <ul class="list-unstyled mb-0 small">
+                        <li><a href="#login" class="text-decoration-none">1. Logging In as Admin</a></li>
+                        <li><a href="#maintenance" class="text-decoration-none">2. Maintenance Mode</a></li>
+                        <li><a href="#playmode" class="text-decoration-none">3. Switching Play Mode</a></li>
+                        <li><a href="#session" class="text-decoration-none">4. Updating Session Date/Time</a></li>
+                        <li><a href="#reset" class="text-decoration-none">5. Resetting the Roster</a></li>
+                        <li><a href="#remove" class="text-decoration-none">6. Removing a Player</a></li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <ul class="list-unstyled mb-0 small">
+                        <li><a href="#courts" class="text-decoration-none">7. Court Assignments</a></li>
+                        <li><a href="#blast" class="text-decoration-none">8. Message Blast</a></li>
+                        <li><a href="#applicants" class="text-decoration-none">9. Approving Applicants</a></li>
+                        <li><a href="#restore" class="text-decoration-none">10. Restoring from Archive</a></li>
+                        <li><a href="#gapweek" class="text-decoration-none">11. Gap / Bye Weeks</a></li>
+                        <li><a href="#venmo" class="text-decoration-none">12. Venmo Card Toggle</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. LOGIN -->
+    <div class="card shadow-sm mb-3 section-card" id="login">
+        <div class="card-header fw-bold">1. Logging In as Admin</div>
+        <div class="card-body">
+            <ol class="mb-0">
+                <li>Go to <a href="/">saturday-tennis.onrender.com</a>.</li>
+                <li>Enter your <strong>4-digit player code</strong> in the login box.</li>
+                <li>Click the small <strong>"admin"</strong> link below the Enter button — the password field will appear.</li>
+                <li>Enter your <strong>admin password</strong> and click Enter.</li>
+                <li>The red <strong>ADMIN SIDEBAR</strong> panel will appear in the left column.</li>
+            </ol>
+            <div class="alert alert-light border mt-3 mb-0 small">
+                <strong>Jim:</strong> code <code>your code</code>, password set in Render environment variables.<br>
+                <strong>Marc:</strong> code <code>0999</code>, password <code>bizMan2026</code>. Marc must be added to the Airtable Master List first.
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. MAINTENANCE -->
+    <div class="card shadow-sm mb-3 section-card" id="maintenance">
+        <div class="card-header fw-bold">2. Maintenance Mode</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Temporarily prevents anyone except admins from signing up or creating teams. Use when making changes mid-week that could affect the roster.</p>
+            <ol class="mb-0">
+                <li>In the Admin Sidebar, click <strong>🔒 Maintenance: OFF</strong> to turn it on.</li>
+                <li>A banner will appear on the site for all users.</li>
+                <li>Click again to turn it off when done.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 3. PLAY MODE -->
+    <div class="card shadow-sm mb-3 section-card" id="playmode">
+        <div class="card-header fw-bold">3. Switching Play Mode</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Controls how the courts and roster are organized.</p>
+            <ul class="mb-2">
+                <li><strong>Open Mode:</strong> All members in one combined list, sorted by signup time. Up to 6 courts of 4.</li>
+                <li><strong>Split Mode:</strong> Players divided by skill level (3.0/3.5 on courts 1–3, 4.0/4.5 on courts 4–6).</li>
+                <li><strong>Team Mode:</strong> Captains sign up a full court (4–8 players). Pending team requests appear for admin review.</li>
+            </ul>
+            <ol class="mb-0">
+                <li>In the Admin Sidebar under <strong>Play Mode</strong>, click the mode you want to activate.</li>
+                <li>The active mode shows a checkmark. Switching resets court assignments to auto.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 4. SESSION DATE/TIME -->
+    <div class="card shadow-sm mb-3 section-card" id="session">
+        <div class="card-header fw-bold">4. Updating Session Date & Time</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Sets the date and time shown at the top of the site and used by the Monday/Friday cron jobs.</p>
+            <ol class="mb-0">
+                <li>In the Admin Sidebar under <strong>📅 Session Update</strong>, edit the date field (format: <code>June 13, 2026</code>) and time field.</li>
+                <li>Click <strong>Update Info</strong>.</li>
+            </ol>
+            <div class="alert alert-warning border-warning mt-3 mb-0 small">
+                <strong>⚠️ Gap Week Safety:</strong> If Target Date is more than 7 days away and players are on the roster, a red warning appears at the top of the Admin Sidebar. This means the Monday cron will auto-skip — verify the date is correct before Monday 8:15 AM.
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. RESET ROSTER -->
+    <div class="card shadow-sm mb-3 section-card" id="reset">
+        <div class="card-header fw-bold">5. Resetting the Roster</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Archives all current signups and clears the roster. The Monday 8:15 AM cron does this automatically each week — only use manually if needed.</p>
+            <ol class="mb-0">
+                <li>In the Admin Sidebar, click <strong>Reset System</strong>.</li>
+                <li>Confirm the prompt. Current signups are archived with today's date.</li>
+                <li>The signup-open email is <em>not</em> sent when done manually (only the Monday cron sends it).</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 6. REMOVE A PLAYER -->
+    <div class="card shadow-sm mb-3 section-card" id="remove">
+        <div class="card-header fw-bold">6. Removing a Player from the Roster</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Use when a player cannot remove themselves (e.g., they're marked NEEDS SUB or PENDING SUB and something went wrong, or they're unreachable).</p>
+            <ol class="mb-0">
+                <li>Find the player in the roster list on the main page.</li>
+                <li>Click the small red <strong>✕</strong> button on the right side of their row.</li>
+                <li>Confirm the dialog. The player is immediately removed from the Signups table.</li>
+                <li>No email is sent to the removed player — contact them separately if needed.</li>
+            </ol>
+            <div class="alert alert-light border mt-3 mb-0 small">
+                If a waitlisted player moves up as a result, they are <em>not</em> automatically notified. You may want to send a Message Blast to the roster.
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. COURT ASSIGNMENTS -->
+    <div class="card shadow-sm mb-3 section-card" id="courts">
+        <div class="card-header fw-bold">7. Court Assignments</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">By default, courts are assigned sequentially (players 1–4 → Court 1, etc.). You can override any court's physical number.</p>
+            <ol class="mb-2">
+                <li>In the Admin Sidebar, find the court assignment dropdowns next to each court label in the roster.</li>
+                <li>Select a physical court number from the dropdown — it saves immediately.</li>
+            </ol>
+            <p class="mb-1 small"><strong>To reset all assignments to auto:</strong></p>
+            <ol class="mb-0">
+                <li>Click <strong>🔄 Reset Court Assignments</strong> in the Admin Sidebar and confirm.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 8. MESSAGE BLAST -->
+    <div class="card shadow-sm mb-3 section-card" id="blast">
+        <div class="card-header fw-bold">8. Message Blast</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Sends a message to either the current roster or the entire member list.</p>
+            <ol class="mb-0">
+                <li>In the Admin Sidebar under <strong>📣 Message Blast</strong>, type your message.</li>
+                <li>Choose <em>Roster Only</em> or <em>Entire List</em> from the dropdown.</li>
+                <li>Click <strong>Send Blast</strong>. Use sparingly — members receive this as an email.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 9. APPLICANTS -->
+    <div class="card shadow-sm mb-3 section-card" id="applicants">
+        <div class="card-header fw-bold">9. Approving Applicants & Guests</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">New members and guests submit requests that require admin approval before they can access the site.</p>
+            <ol class="mb-0">
+                <li>When there are pending requests, a yellow panel appears on the main page (visible to admins only).</li>
+                <li>Review the name and email, then click <strong>Approve</strong> or <strong>Deny</strong>.</li>
+                <li>Approved members are added to the Master List and emailed their access code.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 10. RESTORE -->
+    <div class="card shadow-sm mb-3 section-card" id="restore">
+        <div class="card-header fw-bold">10. Restoring from Archive</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">If a roster is accidentally wiped, you can restore it from the Archive table.</p>
+            <ol class="mb-2">
+                <li>Make sure <strong>Target Date</strong> in Settings is set to the correct session date.</li>
+                <li>Navigate directly to <code>/restore_archive</code> (type it in the browser URL bar).</li>
+                <li>The system will deduplicate by player code and restore the most recent record per player.</li>
+            </ol>
+            <p class="mb-1 small">To wipe the current roster <em>without</em> archiving first:</p>
+            <ol class="mb-0">
+                <li>Navigate to <code>/wipe_signups</code>. Use before restore if needed.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 11. GAP WEEK -->
+    <div class="card shadow-sm mb-3 section-card" id="gapweek">
+        <div class="card-header fw-bold">11. Gap / Bye Weeks (No Tennis)</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">The system auto-detects gap weeks — no checkbox or manual step is needed. Here's how it works:</p>
+            <ul class="mb-2">
+                <li>If <strong>Target Date</strong> is more than 7 days from Monday, the Monday cron automatically skips the purge and sends a "see you on [date]" notice instead.</li>
+                <li>The Friday cron similarly sends a bye-week notice instead of the lock-in email.</li>
+            </ul>
+            <p class="fw-bold mb-1 small">The one thing to verify before a gap week:</p>
+            <ol class="mb-0">
+                <li>In Airtable Settings (or via <strong>📅 Session Update</strong>), confirm <strong>Target Date</strong> is set to the correct <em>next</em> session date (not the off Saturday).</li>
+                <li>That's it — the crons handle everything else.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- 12. VENMO -->
+    <div class="card shadow-sm mb-4 section-card" id="venmo">
+        <div class="card-header fw-bold">12. Venmo Card Toggle</div>
+        <div class="card-body">
+            <ol class="mb-0">
+                <li>In the Admin Sidebar, click <strong>💙 Venmo Card: OFF/ON</strong> to show or hide the Venmo chip-in card on the main page.</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="text-center text-muted small mb-4">
+        Saturday Tennis Gang Admin Guide · Confidential
+    </div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
