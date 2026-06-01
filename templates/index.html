@@ -46,6 +46,12 @@
             <h3 class="text-secondary">@ Dawson School</h3>
             <p class="lead mb-1"><strong>{{ target_date }}</strong> | {{ start_time }}{{ end_time }}</p>
             <span class="badge bg-info text-dark shadow-sm fs-5 mb-3">{{ weather }}</span>
+            <div class="mt-2">
+                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#howToModal">❓ How It Works</button>
+                {% if session.get('user') and session.user.get('is_admin') %}
+                <a href="/admin_guide" class="btn btn-sm btn-outline-warning ms-2">📋 Admin Guide</a>
+                {% endif %}
+            </div>
             
             <div class="mt-1">
                 {% if maintenance_mode %}
@@ -96,6 +102,7 @@
                         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">{{ session.user.get('first') }}</h5>
                             <div>
+                                <a href="/calendar" class="btn btn-sm btn-outline-light me-1">📅 Schedule</a>
                                 <button class="btn btn-sm btn-outline-light me-1" data-bs-toggle="modal" data-bs-target="#profileModal">Profile</button>
                                 <a href="/logout" class="btn btn-sm btn-light">Logout</a>
                             </div>
@@ -352,6 +359,12 @@
                                                 <input type="hidden" name="record_id" value="{{ player.get('id') }}">
                                                 <input type="hidden" name="direction" value="down">
                                                 <button type="submit" class="btn btn-outline-secondary btn-move" title="Move Down" {% if loop.last %}disabled{% endif %}>▼</button>
+                                            </form>
+                                            <form action="/admin_remove_player" method="POST" class="m-0 p-0"
+                                                  onsubmit="return confirm('Remove {{ player.get("First","") }} {{ player.get("Last","") }} from the roster?');">
+                                                <input type="hidden" name="signup_id" value="{{ player.get('id') }}">
+                                                <input type="hidden" name="player_name" value="{{ player.get('First','') }} {{ player.get('Last','') }}">
+                                                <button type="submit" class="btn btn-outline-danger btn-move" title="Remove from roster">✕</button>
                                             </form>
                                         </div>
                                         {% endif %}
@@ -679,6 +692,68 @@
         </div>
     </div>
     {% endif %}
+
+
+    <!-- ── How It Works Modal (visible to all) ────────────────────────── -->
+    <div class="modal fade" id="howToModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title fw-bold">🎾 How It Works</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+
+                    <div class="mb-4">
+                        <h6 class="fw-bold text-success border-bottom pb-1">✅ How to Sign Up</h6>
+                        <ol class="mb-0">
+                            <li>Enter your <strong>4-digit code</strong> and click <em>Enter</em>.</li>
+                            <li>Once logged in, click the green <strong>Sign Me Up!</strong> button.</li>
+                            <li>You'll appear on the roster immediately. If all playing spots are filled, you'll be placed on the waitlist automatically.</li>
+                        </ol>
+                    </div>
+
+                    <div class="mb-4">
+                        <h6 class="fw-bold text-warning border-bottom pb-1">⚠️ How to Cancel (Before Friday Morning)</h6>
+                        <ol class="mb-0">
+                            <li>Log in and click <strong>Cancel My Spot</strong>.</li>
+                            <li>You'll be removed immediately and the next waitlisted player moves up.</li>
+                            <li>Please cancel before <strong>Friday morning</strong> to avoid triggering the sub process.</li>
+                        </ol>
+                    </div>
+
+                    <div class="mb-4">
+                        <h6 class="fw-bold text-danger border-bottom pb-1">🆘 How to Request a Sub (Friday or Later)</h6>
+                        <ol class="mb-0">
+                            <li>Log in and click <strong>Drop / Need a Sub</strong>.</li>
+                            <li>Choose <em>"I need a sub"</em> — this flags your spot and emails the next waitlisted player with a sub offer.</li>
+                            <li>You stay on the roster as <strong>NEEDS SUB</strong> until someone accepts.</li>
+                            <li>Once a sub accepts, you're removed and they take your spot.</li>
+                            <li>If no one is on the waitlist, your spot will be listed as open — reach out to the group directly.</li>
+                        </ol>
+                    </div>
+
+                    <div class="mb-2">
+                        <h6 class="fw-bold text-primary border-bottom pb-1">📬 How to Accept a Sub Offer (Waitlist Players)</h6>
+                        <ol class="mb-0">
+                            <li>If you're on the waitlist, you may receive a <strong>sub offer email</strong> when a playing spot opens Friday or later.</li>
+                            <li>Log in to the site — you'll see an <strong>Accept Spot</strong> button at the top of the sidebar.</li>
+                            <li>Click it to confirm. You'll be moved from the waitlist to the playing roster.</li>
+                            <li>If you don't respond in time, the offer passes to the next person on the waitlist.</li>
+                        </ol>
+                    </div>
+
+                    <div class="alert alert-light border mt-3 mb-0">
+                        <small class="text-muted">📅 Check the <a href="/calendar">Summer Schedule</a> for upcoming dates, time changes, and weeks led by Marc Levinson.</small>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     {% if play_mode == 'Team' and session.get('user') %}
