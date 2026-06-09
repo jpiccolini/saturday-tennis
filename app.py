@@ -1753,8 +1753,6 @@ def cron_friday():
 # ── Calendar page (login required) ──────────────────────────────────────────
 @app.route('/calendar')
 def calendar_page():
-    if not session.get('user'):
-        return redirect(url_for('index'))
     return render_template('calendar.html')
 
 # ── Admin guide (admin only) ─────────────────────────────────────────────────
