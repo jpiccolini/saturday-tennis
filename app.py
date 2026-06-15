@@ -1627,6 +1627,17 @@ def cron_monday():
         # 3. Archive everyone and clear signups
         _archive_and_clear_signups(settings, signups)
 
+        # 4. Auto-advance Target Date to next Saturday (+7 days)
+        try:
+            next_target = dt.datetime.strptime(d_date, "%B %d, %Y").date() + dt.timedelta(days=7)
+            next_date_str = next_target.strftime("%B %-d, %Y")
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                           headers=HEADERS, json={"fields": {"Target Date": next_date_str}}, timeout=10)
+            invalidate('Settings')
+            log_activity("Cron", f"Auto-advanced Target Date to {next_date_str}")
+        except Exception as _e:
+            log_activity("Cron", f"Failed to auto-advance Target Date: {_e}")
+
     # 4. Send the weekly email (signup-open OR reminder if skip_reset)
     try:
         weather_html = get_saturday_weather(d_start)
