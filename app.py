@@ -1429,6 +1429,41 @@ def attendance(code_str):
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
+
+# ── One-time fix: restore roster order from the June 16 screenshot ────────────
+# Run once by visiting /fix_roster_order while logged in as admin, then it can
+# be removed. Stamps Manual Order 1..N in the known-correct sequence by Player Code.
+@app.route('/fix_roster_order')
+def fix_roster_order():
+    if not session.get('user') or not session['user'].get('is_admin'):
+        return "Unauthorized", 403
+    correct_order = ['1031','1064','1061','1043','1029','1008','1108','1048','1035','1082','1058']
+    signups = get_airtable_data("Signups")
+    by_code = {}
+    for r in signups:
+        code = str(r['fields'].get('Player Code','')).replace('.0','').strip()
+        by_code[code] = r
+    base_url = f"https://api.airtable.com/v0/{BASE_ID}/Signups"
+    fixed, missing = 0, []
+    for position, code in enumerate(correct_order, start=1):
+        rec = by_code.get(code)
+        if not rec:
+            missing.append(code)
+            continue
+        try:
+            requests.patch(f"{base_url}/{rec['id']}", headers=HEADERS,
+                           json={"fields": {"Manual Order": position}}, timeout=10)
+            fixed += 1
+        except Exception:
+            pass
+    invalidate('Signups')
+    msg = f"Restored order for {fixed} players."
+    if missing:
+        msg += f" Codes not on roster (skipped): {', '.join(missing)}."
+    flash(msg, "success")
+    log_activity("Admin", f"Roster order restored ({fixed} players)")
+    return redirect(url_for('index'))
+
 @app.route('/reorder', methods=['POST'])
 def reorder():
     """Admin-only: move a signup record up or down in the manual roster order."""
@@ -1454,16 +1489,19 @@ def reorder():
 
     swap_idx = idx - 1 if direction == 'up' else idx + 1
 
-    # Assign 1-based Manual Order values to the two swapped records
-    new_order_this = swap_idx + 1
-    new_order_swap = idx + 1
+    # Swap the two records in the ordered list, then re-stamp the ENTIRE roster
+    # with sequential Manual Order values (1..N). This guarantees every record is
+    # ordered explicitly, so a single click moves a player exactly one position
+    # instead of jumping ahead of everyone who has no Manual Order value.
+    signups[idx], signups[swap_idx] = signups[swap_idx], signups[idx]
 
     base_url = f"https://api.airtable.com/v0/{BASE_ID}/Signups"
     try:
-        requests.patch(f"{base_url}/{signups[idx]['id']}", headers=HEADERS,
-                       json={"fields": {"Manual Order": new_order_this}}, timeout=10)
-        requests.patch(f"{base_url}/{signups[swap_idx]['id']}", headers=HEADERS,
-                       json={"fields": {"Manual Order": new_order_swap}}, timeout=10)
+        for position, rec in enumerate(signups, start=1):
+            # Only patch when the value actually changes, to minimize API calls
+            if rec.get('fields', {}).get('Manual Order') != position:
+                requests.patch(f"{base_url}/{rec['id']}", headers=HEADERS,
+                               json={"fields": {"Manual Order": position}}, timeout=10)
     except Exception as e:
         flash(f"Reorder failed: {e}", "danger")
         return redirect(url_for('index'))
