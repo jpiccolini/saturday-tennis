@@ -1433,16 +1433,118 @@ def attendance(code_str):
 # ── One-time fix: restore roster order from the June 16 screenshot ────────────
 # Run once by visiting /fix_roster_order while logged in as admin, then it can
 # be removed. Stamps Manual Order 1..N in the known-correct sequence by Player Code.
+
+# ── Pre-flight check: verify the site is ready for a hands-off window ─────────
+# Admin-only. Visit /preflight before travelling to confirm every setting the
+# cron does NOT manage is correct. Read-only — changes nothing.
+@app.route('/preflight')
+def preflight():
+    if not session.get('user') or not session['user'].get('is_admin'):
+        return "Unauthorized", 403
+
+    invalidate('Settings')
+    settings = get_airtable_data("Settings")
+    f = settings[0]['fields'] if settings else {}
+
+    target_date = f.get('Target Date', '')
+    start_time  = f.get('Start Time', '')
+    play_mode   = f.get('Play Mode', 'Open')
+    skip_reset  = f.get('Skip Next Reset', False)
+
+    roster_count = len(get_airtable_data("Signups"))
+
+    # Days until target
+    days_until = None
+    try:
+        t = dt.datetime.strptime(target_date, "%B %d, %Y").date()
+        days_until = (t - dt.date.today()).days
+    except Exception:
+        pass
+
+    checks = []
+
+    # 1. Target Date is set and parseable
+    checks.append({
+        "label": "Target Date is set and valid",
+        "ok": days_until is not None,
+        "detail": f"Currently: {target_date or '(blank)'}" if days_until is not None
+                  else f"Could not read date '{target_date}'. Expected format: June 20, 2026",
+    })
+
+    # 2. Target Date is in the normal window (not a stale past date, not a far-future gap)
+    if days_until is not None:
+        in_window = 0 <= days_until <= 7
+        checks.append({
+            "label": "Target Date points to the upcoming Saturday",
+            "ok": in_window,
+            "detail": f"{days_until} day(s) away."
+                      + ("" if in_window else
+                         " ⚠️ If >7, Monday cron will auto-SKIP the reset (treats it as a bye week)."
+                         if days_until > 7 else
+                         " ⚠️ Date is in the past — update it to the next session."),
+        })
+
+    # 3. Start Time set
+    checks.append({
+        "label": "Start Time is set",
+        "ok": bool(start_time and start_time != 'TBD'),
+        "detail": f"Currently: {start_time or '(blank)'}. (Cron does NOT change this — it stays fixed every week.)",
+    })
+
+    # 4. Play Mode is Open (Marc-led weeks are Open play)
+    checks.append({
+        "label": "Play Mode is 'Open'",
+        "ok": play_mode == 'Open',
+        "detail": f"Currently: {play_mode}. (Cron preserves whatever mode is set.)",
+    })
+
+    # 5. Skip Next Reset is OFF
+    checks.append({
+        "label": "Skip Next Reset is unchecked",
+        "ok": not skip_reset,
+        "detail": "Checked — Monday cron will SKIP the reset!" if skip_reset
+                  else "Unchecked — normal weekly reset will run.",
+    })
+
+    # 6. Core env / credentials present (emails can send)
+    checks.append({
+        "label": "Email credentials configured",
+        "ok": bool(FROM_EMAIL and GMAIL_PW),
+        "detail": "Gmail sender + app password present." if (FROM_EMAIL and GMAIL_PW)
+                  else "Missing FROM_EMAIL or GMAIL_PASSWORD — Friday/Monday emails will NOT send.",
+    })
+
+    # 7. Multi-admin: Marc's access present
+    checks.append({
+        "label": "More than one admin password configured",
+        "ok": len(ADMIN_PWS) >= 2,
+        "detail": f"{len(ADMIN_PWS)} admin password(s) set in ADMIN_PASSWORD."
+                  + ("" if len(ADMIN_PWS) >= 2 else " Add Marc's with a comma if he needs access."),
+    })
+
+    all_ok = all(c["ok"] for c in checks)
+    return render_template('preflight.html',
+                           checks=checks, all_ok=all_ok,
+                           roster_count=roster_count,
+                           target_date=target_date, start_time=start_time,
+                           play_mode=play_mode, days_until=days_until)
+
 @app.route('/fix_roster_order')
 def fix_roster_order():
     if not session.get('user') or not session['user'].get('is_admin'):
         return "Unauthorized", 403
+    def norm(v):
+        # Normalize any code form (int 1031, float 1031.0, str '1031', '1031.0') to '1031'
+        s = str(v).strip()
+        if s.endswith('.0'):
+            s = s[:-2]
+        return s
+
     correct_order = ['1031','1064','1061','1043','1029','1008','1108','1048','1035','1082','1058']
+    invalidate('Signups')                      # read fresh, not cached
     signups = get_airtable_data("Signups")
-    by_code = {}
-    for r in signups:
-        code = str(r['fields'].get('Player Code','')).replace('.0','').strip()
-        by_code[code] = r
+    by_code = {norm(r['fields'].get('Player Code','')): r for r in signups}
+
     base_url = f"https://api.airtable.com/v0/{BASE_ID}/Signups"
     fixed, missing = 0, []
     for position, code in enumerate(correct_order, start=1):
@@ -1451,17 +1553,22 @@ def fix_roster_order():
             missing.append(code)
             continue
         try:
-            requests.patch(f"{base_url}/{rec['id']}", headers=HEADERS,
-                           json={"fields": {"Manual Order": position}}, timeout=10)
-            fixed += 1
-        except Exception:
-            pass
+            resp = requests.patch(f"{base_url}/{rec['id']}", headers=HEADERS,
+                                  json={"fields": {"Manual Order": position}}, timeout=10)
+            if resp.status_code == 200:
+                fixed += 1
+            else:
+                missing.append(f"{code}(HTTP {resp.status_code})")
+        except Exception as e:
+            missing.append(f"{code}(err)")
     invalidate('Signups')
-    msg = f"Restored order for {fixed} players."
+
+    seen = sorted(by_code.keys())
+    msg = f"Restored order for {fixed} players. Codes found on roster: {', '.join(seen)}."
     if missing:
-        msg += f" Codes not on roster (skipped): {', '.join(missing)}."
-    flash(msg, "success")
-    log_activity("Admin", f"Roster order restored ({fixed} players)")
+        msg += f" Not matched/failed: {', '.join(missing)}."
+    flash(msg, "success" if fixed else "danger")
+    log_activity("Admin", f"Roster order restore: {fixed} fixed, missing={missing}")
     return redirect(url_for('index'))
 
 @app.route('/reorder', methods=['POST'])
