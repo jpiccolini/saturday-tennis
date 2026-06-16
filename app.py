@@ -9,7 +9,7 @@
 # 7. CRON / AUTOMATION ROUTES
 # ==========================================
 
-import os, requests, smtplib, uuid
+import os, requests, smtplib, uuid, threading
 from flask import Flask, render_template, request, session, redirect, url_for, flash, jsonify
 import datetime as dt
 from datetime import timedelta
@@ -1546,6 +1546,10 @@ def get_ordinal(n):
 
 @app.route('/cron/monday')
 def cron_monday():
+    threading.Thread(target=_run_monday_cron, daemon=True).start()
+    return "Monday cron started.", 200
+
+def _run_monday_cron():
     invalidate('Settings')   # always read fresh — Week Note, Skip Next Reset, etc. must not be cached
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
@@ -1657,6 +1661,10 @@ def cron_monday():
 
 @app.route('/cron/friday')
 def cron_friday():
+    threading.Thread(target=_run_friday_cron, daemon=True).start()
+    return "Friday cron started.", 200
+
+def _run_friday_cron():
     invalidate('Settings')   # always read fresh — cron flags (Skip Next Reset) must not be cached
     settings = get_airtable_data("Settings")
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
