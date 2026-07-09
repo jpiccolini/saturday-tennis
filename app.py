@@ -489,7 +489,106 @@ def index():
                            show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
                            court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
                            pending_teams=pending_teams, maintenance_mode=MAINTENANCE_MODE,
-                           gap_week_warning=gap_week_warning, days_until_target=days_until_target)
+                           gap_week_warning=gap_week_warning, days_until_target=days_until_target,
+                           from_email=FROM_EMAIL)
+
+
+# ── Player self-service: look up my own player code ───────────────────────────
+@app.route('/lookup_code', methods=['POST'])
+def lookup_code():
+    email = (request.form.get('email') or '').strip().lower()
+    if not email:
+        flash("Please enter your email address.", "warning")
+        return redirect(url_for('index'))
+    master = get_airtable_data("Master List")
+    match = None
+    for m in master:
+        m_email = str(m['fields'].get('Email', '')).strip().lower()
+        if m_email == email:
+            match = m
+            break
+    # Always show the same message whether or not a match was found, so this
+    # can't be used to test which emails are registered.
+    if match:
+        code = str(match['fields'].get('Code', '')).strip()
+        if code.endswith('.0'):
+            code = code[:-2]
+        first = match['fields'].get('First', '')
+        try:
+            send_email(match['fields'].get('Email'), "🎾 Your Saturday Tennis Gang ID",
+                       f"<p>Hi {first},</p><p>Your player ID is: <b style='font-size:1.4em;'>{code}</b></p>"
+                       f"<p>Use this to log in at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>")
+        except Exception:
+            pass
+    flash("If that email is registered, your player ID has been sent to it. Check your inbox (and spam folder).", "info")
+    return redirect(url_for('index'))
+
+@app.route('/get_email_by_code', methods=['POST'])
+def get_email_by_code():
+    """AJAX: given a player code, return masked email + first name for the pre-login edit flow."""
+    code = str(request.form.get('code', '')).strip()
+    if code.endswith('.0'):
+        code = code[:-2]
+    if not code:
+        return jsonify({'status': 'error', 'message': 'Please enter your 4-digit code.'})
+    master = get_airtable_data("Master List")
+    match = None
+    for m in master:
+        m_code = str(m['fields'].get('Code', '')).strip()
+        if m_code.endswith('.0'):
+            m_code = m_code[:-2]
+        if m_code == code:
+            match = m
+            break
+    if not match:
+        return jsonify({'status': 'not_found', 'message': 'Code not found. Check your ID and try again.'})
+    f = match['fields']
+    email = f.get('Email', '')
+    # Mask: show first char + **** + @domain
+    masked = email
+    if '@' in email:
+        local, domain = email.split('@', 1)
+        masked = (local[0] + '*' * max(len(local) - 1, 3) + '@' + domain) if local else email
+    return jsonify({'status': 'found', 'first': f.get('First', ''), 'masked_email': masked, 'code': code})
+
+
+@app.route('/update_email_public', methods=['POST'])
+def update_email_public():
+    """Public (pre-login) email update: verify code, then patch Master List."""
+    code = str(request.form.get('code', '')).strip()
+    if code.endswith('.0'):
+        code = code[:-2]
+    new_email = (request.form.get('new_email') or '').strip()
+    if not code or not new_email:
+        flash("Code and email are required.", "warning")
+        return redirect(url_for('index'))
+    master = get_airtable_data("Master List")
+    match = None
+    for m in master:
+        m_code = str(m['fields'].get('Code', '')).strip()
+        if m_code.endswith('.0'):
+            m_code = m_code[:-2]
+        if m_code == code:
+            match = m
+            break
+    if not match:
+        flash("Code not found. Email not updated.", "danger")
+        return redirect(url_for('index'))
+    try:
+        requests.patch(
+            f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{match['id']}",
+            headers=HEADERS,
+            json={"fields": {"Email": new_email}},
+            timeout=10
+        )
+        invalidate('Master List')
+        first = match['fields'].get('First', '')
+        log_activity(first, f"Updated email via public form → {new_email}")
+        flash(f"Email updated for {first}! Use your new address going forward.", "success")
+    except Exception as e:
+        flash(f"Update failed: {e}", "danger")
+    return redirect(url_for('index'))
+
 
 @app.route('/validate', methods=['POST'])
 def validate():
@@ -1277,8 +1376,15 @@ def admin_action():
     action = request.form.get('action')
     settings = get_airtable_data("Settings")
     if action == "labels" and settings:
-        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS, json={"fields": {"Target Date": request.form.get('date'), "Start Time": request.form.get('time')}})
-        flash("Session info updated!", "success")
+        new_date = request.form.get('date')
+        new_time = request.form.get('time')
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
+                       json={"fields": {"Target Date": new_date, "Start Time": new_time}}, timeout=10)
+        # Bust the Settings cache immediately so every page and every automatic
+        # email (signup confirmations, team summaries, etc.) sees the new date/time
+        # right away instead of waiting up to 1 hour for the cache to expire.
+        invalidate('Settings')
+        flash(f"Session info updated! Now showing {new_date} at {new_time}.", "success")
     elif action == "toggle_maintenance" and settings:
         current = bool(settings[0]['fields'].get('Maintenance Mode', False))
         new_val = not current
