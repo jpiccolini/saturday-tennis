@@ -1888,6 +1888,8 @@ def _run_monday_cron():
             next_date_str = next_target.strftime("%B %-d, %Y")
             requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
                            headers=HEADERS, json={"fields": {"Target Date": next_date_str}}, timeout=10)
+            d_date = next_date_str   # keep local var in sync with what we just wrote to Airtable,
+                                      # so the email below announces the NEW date, not the one that just passed
             invalidate('Settings')
             log_activity("Cron", f"Auto-advanced Target Date to {next_date_str}")
         except Exception as _e:
