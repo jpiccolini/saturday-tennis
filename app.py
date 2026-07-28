@@ -1856,6 +1856,32 @@ def _run_monday_cron():
 
     signups = get_airtable_data("Signups", sort_field="Created Time")
 
+    # Safety-net snapshot: capture exactly who's on the list right now, before
+    # any archive/clear/skip logic runs. Sent every Monday regardless of
+    # skip_reset, so there's always a backup copy even if a setting is missed.
+    try:
+        if signups:
+            rows = ""
+            for i, r in enumerate(signups, start=1):
+                f = r.get('fields', {})
+                first = f.get('First', '')
+                last = f.get('Last', '')
+                level = f.get('Level', '')
+                email = f.get('Email', '')
+                rows += f"<tr><td>{i}</td><td>{first} {last}</td><td>{level}</td><td>{email}</td></tr>"
+            snapshot_html = (
+                f"<p>Snapshot of the Signups table taken at the start of the Monday cron, "
+                f"for <b>{d_date}</b>, before any reset/skip logic ran.</p>"
+                f"<table border='1' cellpadding='4' cellspacing='0'>"
+                f"<tr><th>#</th><th>Name</th><th>Level</th><th>Email</th></tr>{rows}</table>"
+            )
+        else:
+            snapshot_html = f"<p>Snapshot for <b>{d_date}</b>: no one was signed up at cron start.</p>"
+        send_email(ADMIN_EMAIL, f"🗂️ Signup Snapshot — {d_date}", snapshot_html)
+        log_activity("Cron", f"Snapshot captured for {d_date}: {len(signups)} signups")
+    except Exception as _e:
+        log_activity("Cron", f"Snapshot failed for {d_date}: {_e}")
+
     if not skip_reset:
         # 1. Calculate stats for players who actually played
         played_levels = {}
