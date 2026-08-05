@@ -133,6 +133,13 @@
                                         </button>
                                     </form>
 
+                                    <form action="/admin_action" method="POST" class="mb-3">
+                                        <input type="hidden" name="action" value="refresh_cache">
+                                        <button class="btn btn-sm w-100 btn-outline-primary" title="Use after editing Airtable directly — a browser refresh alone won't pick up the change.">
+                                            🔄 Refresh Data
+                                        </button>
+                                    </form>
+
                                     <div class="mb-3">
                                         <p class="small text-muted mb-1 fw-bold">Play Mode</p>
                                         {% for mode in ['Open', 'Split', 'Team'] %}
