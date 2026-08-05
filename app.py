@@ -1469,6 +1469,13 @@ def admin_action():
         log_activity("Admin", "Manual roster reset — signups archived, no emails sent")
         flash("Roster cleared and archived. Signup emails will go out via the Monday cron at 8:15 AM.", "success")
         return redirect(url_for('index'))
+    elif action == "refresh_cache":
+        # No-op besides the unconditional clear below — use this after editing
+        # Airtable directly, since the server cache (5 min for Signups, 1 hr
+        # for Settings/Master List) doesn't know about outside edits until it
+        # expires. A browser hard refresh has no effect on this — it's server
+        # memory, not the browser's cache.
+        flash("🔄 Data refreshed — the site now reflects the latest Airtable data.", "success")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
