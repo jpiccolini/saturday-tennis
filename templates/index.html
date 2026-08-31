@@ -46,6 +46,7 @@
             <h3 class="text-secondary">@ Dawson School</h3>
             <p class="lead mb-1"><strong>{{ target_date }}</strong> | {{ start_time }}{{ end_time }}</p>
             <span class="badge bg-info text-dark shadow-sm fs-5 mb-3">{{ weather }}</span>
+            <p class="small text-muted mb-3">Signups available: <strong>{{ signups_availability }}</strong></p>
             <div class="mt-2">
                 <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#howToModal">❓ How It Works</button>
                 {% if session.get('user') and session.user.get('is_admin') %}
@@ -194,10 +195,13 @@
                                         </select>
                                         <button class="btn btn-sm btn-danger w-100">Send Blast</button>
                                     </form>
-                                    <h6 class="small fw-bold">📅 Session Update</h6>
+                                    <h6 class="small fw-bold">📅 Next Scheduled Date</h6>
                                     <form action="/admin_action" method="POST">
                                         <input type="hidden" name="action" value="labels">
-                                        <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ target_date }}">
+                                        <label class="small text-muted mb-0">Date</label>
+                                        <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ target_date }}"
+                                               title="Format: Month D, YYYY (e.g. September 12, 2026). If this is more than a week out, signups auto-close until the normal weekly announcement catches up.">
+                                        <label class="small text-muted mb-0">Time</label>
                                         <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
                                         <button class="btn btn-sm btn-outline-dark w-100 mb-2">Update Info</button>
                                     </form>
