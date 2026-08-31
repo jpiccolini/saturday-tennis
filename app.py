@@ -2062,19 +2062,25 @@ def _run_monday_cron():
         except Exception as _e:
             log_activity("Cron", f"Failed to auto-advance Target Date: {_e}")
 
-    # 4. Send the weekly email (signup-open OR reminder if skip_reset)
-    try:
-        weather_html = get_saturday_weather(d_start)
-        emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-        subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
-        send_email(emails, subject,
-            f"<h3>{'Reminder' if skip_reset else 'Signups are open'}!</h3>"
-            f"<p><b>Date:</b> {d_date} &nbsp;|&nbsp; <b>Time:</b> {d_start}</p>"
-            f"{weather_html}"
-            f"<p>{mode_explanation}</p>"
-            f"<p><a href='{SITE_URL}'>{'View the roster' if skip_reset else 'Claim your spot'}</a></p>",
-            is_multiple=True)
-    except: pass
+    # 4. Send the weekly email (signup-open OR reminder if skip_reset) —
+    # but not at all if this is a declared off-week (Signups Closed). The
+    # admin snapshot above still goes out regardless; this is the
+    # player-facing "come sign up" message specifically.
+    if is_signups_closed():
+        log_activity("Cron", f"Monday message suppressed — signups closed for {d_date}")
+    else:
+        try:
+            weather_html = get_saturday_weather(d_start)
+            emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
+            subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
+            send_email(emails, subject,
+                f"<h3>{'Reminder' if skip_reset else 'Signups are open'}!</h3>"
+                f"<p><b>Date:</b> {d_date} &nbsp;|&nbsp; <b>Time:</b> {d_start}</p>"
+                f"{weather_html}"
+                f"<p>{mode_explanation}</p>"
+                f"<p><a href='{SITE_URL}'>{'View the roster' if skip_reset else 'Claim your spot'}</a></p>",
+                is_multiple=True)
+        except: pass
         
     AIRTABLE_CACHE.clear()
     return "Monday reset, stats calculated, and emails sent successfully.", 200
@@ -2090,6 +2096,13 @@ def _run_friday_cron():
     d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
+
+    # Declared off-week (Signups Closed): no roster to lock, no message to
+    # send — skip Friday's cron entirely rather than sending either the
+    # normal lock-in emails or the bye-week notice.
+    if is_signups_closed():
+        log_activity("Cron", f"Friday message suppressed — signups closed for {d_date}")
+        return "Signups closed — Friday message suppressed.", 200
 
     # Bye week: manual flag OR auto-detect (Target Date > 7 days away)
     skip_friday = settings[0]['fields'].get('Skip Next Reset', False) if settings else False
