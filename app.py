@@ -144,6 +144,7 @@ def build_court_map(n_courts, group_sizes, overrides, prefix=''):
 AIRTABLE_CACHE = {}
 PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
 MAINTENANCE_MODE = False    # when True, only admin can sign up or create teams
+SIGNUPS_CLOSED = False      # when True, no tennis this week — signups closed, distinct from Maintenance
 
 # Per-table cache TTLs — static tables cache longer to reduce API calls
 CACHE_TTL_MAP = {
@@ -202,6 +203,11 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
         return records
     except Exception as e:
         print(f"Airtable Fetch Error ({table_name}): {e}")
+        # Also log to the Logs table itself so this is visible right next to
+        # login attempts and cron activity, without digging through Render's
+        # raw request logs. Throttled naturally by ERROR_CACHE_TTL (30s) below,
+        # so a sustained outage logs at most one line per table per 30s.
+        log_activity("System", f"Airtable Fetch Error ({table_name}): {e}")
         # CRITICAL: cache the failure too. Otherwise every page reload retries
         # immediately, which during a 429 window keeps the rate-limit alive
         # forever and the site never recovers on its own.
@@ -225,6 +231,17 @@ def is_maintenance_mode():
         return True
     settings = get_airtable_data("Settings")
     return bool(settings[0]['fields'].get('Maintenance Mode', False)) if settings else False
+
+def is_signups_closed():
+    """True if signups are closed for this week (e.g. no tennis this Saturday).
+    Same durable-check pattern as is_maintenance_mode() — checks the in-memory
+    flag OR the Airtable field, so it survives a Render restart. Distinct from
+    Maintenance Mode: this is for a planned no-play week, not a technical pause,
+    and shows its own banner with its own wording."""
+    if SIGNUPS_CLOSED:
+        return True
+    settings = get_airtable_data("Settings")
+    return bool(settings[0]['fields'].get('Signups Closed', False)) if settings else False
 
 # === SORT KEY for manual roster ordering ===
 # Records with a "Manual Order" number sort first (ascending).
@@ -259,10 +276,9 @@ def index():
         play_mode = session.pop('forced_play_mode')
         session.modified = True
 
-    # Maintenance mode: read from Airtable (persists across restarts), module var as same-session override
-    maintenance_mode = MAINTENANCE_MODE or bool(
-        settings[0]['fields'].get('Maintenance Mode', False) if settings else False
-    )
+    # Maintenance mode / signups-closed: read from Airtable (persists across restarts), module var as same-session override
+    maintenance_mode = is_maintenance_mode()
+    signups_closed = is_signups_closed()
 
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
@@ -500,7 +516,8 @@ def index():
                            upper_roster=upper_roster, lower_cutoff=lower_cutoff, upper_cutoff=upper_cutoff,
                            show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
                            court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
-                           pending_teams=pending_teams, maintenance_mode=MAINTENANCE_MODE,
+                           pending_teams=pending_teams, maintenance_mode=maintenance_mode,
+                           signups_closed=signups_closed,
                            gap_week_warning=gap_week_warning, days_until_target=days_until_target,
                            from_email=FROM_EMAIL)
 
@@ -651,6 +668,10 @@ def signup():
 
     if is_maintenance_mode() and not user.get('is_admin'):
         flash("Signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
+        return redirect(url_for('index'))
+
+    if is_signups_closed() and not user.get('is_admin'):
+        flash("Signups are closed this week — no tennis this Saturday.", "warning")
         return redirect(url_for('index'))
 
     if not user.get('contact_confirmed') or not user.get('level'):
@@ -1085,6 +1106,10 @@ def team_create():
         flash("Team signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
         return redirect(url_for('index'))
 
+    if is_signups_closed() and not user.get('is_admin'):
+        flash("Signups are closed this week — no tennis this Saturday.", "warning")
+        return redirect(url_for('index'))
+
     existing = get_airtable_data("Signups", filter_formula=f"{{Player Code}}='{user['code']}'")
     if existing:
         flash("You are already on the roster.", "warning")
@@ -1383,7 +1408,7 @@ def restore_archive():
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
-    global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE   # declare at top — Python 3.14 requires this
+    global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE, SIGNUPS_CLOSED   # declare at top — Python 3.14 requires this
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     action = request.form.get('action')
     settings = get_airtable_data("Settings")
@@ -1412,6 +1437,22 @@ def admin_action():
                     AIRTABLE_CACHE[key] = (time.time(), records)
         status = "ON — only you can sign up or create teams." if new_val else "OFF — signups open to everyone."
         flash(f"Maintenance mode {status}", "warning" if new_val else "success")
+        return redirect(url_for('index'))
+    elif action == "toggle_signups_closed" and settings:
+        current = bool(settings[0]['fields'].get('Signups Closed', False))
+        new_val = not current
+        SIGNUPS_CLOSED = new_val   # module-level for current session
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+            headers=HEADERS, json={"fields": {"Signups Closed": new_val}}, timeout=10)
+        for key in list(AIRTABLE_CACHE.keys()):
+            if key.startswith('Settings'):
+                _, records = AIRTABLE_CACHE[key]
+                if records:
+                    records[0]['fields']['Signups Closed'] = new_val
+                    AIRTABLE_CACHE[key] = (time.time(), records)
+        status = "CLOSED — no tennis this week." if new_val else "OPEN — back to normal."
+        flash(f"Signups {status}", "warning" if new_val else "success")
+        log_activity("Admin", f"Toggled Signups Closed → {new_val}")
         return redirect(url_for('index'))
     elif action == "toggle_mode" and settings:
         cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
