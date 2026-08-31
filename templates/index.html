@@ -140,6 +140,13 @@
                                         </button>
                                     </form>
 
+                                    <form action="/wipe_signups" method="POST" class="mb-3"
+                                          onsubmit="return confirm('Delete ALL current signups? No archiving, no stats, no emails — use this when a week is cancelled and nobody actually played.');">
+                                        <button class="btn btn-sm w-100 btn-outline-danger" title="Clear the signup list without archiving — for a cancelled week, not a played one.">
+                                            🗑️ Wipe Signups (No Game)
+                                        </button>
+                                    </form>
+
                                     <div class="mb-3">
                                         <p class="small text-muted mb-1 fw-bold">Play Mode</p>
                                         {% for mode in ['Open', 'Split', 'Team'] %}
