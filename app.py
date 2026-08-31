@@ -282,20 +282,28 @@ def index():
 
     # "Signups available" display: open now, or an estimate of when they'll
     # open. Target Date is always a Saturday, and signups normally open the
-    # Monday of that same week (5 days earlier) — that's an estimate based on
-    # the normal weekly rhythm, not a stored/guaranteed value, since reopening
+    # Monday of that same week (5 days earlier), around when the cron fires
+    # (observed at 8:15 AM in Render's logs) — an estimate based on the
+    # normal weekly rhythm, not a stored/guaranteed value, since reopening
     # is still a deliberate action (Signups toggle or the Monday cron).
+    CRON_TIME = "8:15 AM"
     if not (maintenance_mode or signups_closed):
         signups_availability = "Now"
     else:
-        try:
-            target_dt = dt.datetime.strptime(d_date, "%B %d, %Y").date()
+        target_dt = None
+        for fmt in ("%B %d, %Y", "%m/%d/%y", "%m/%d/%Y"):  # tolerate shorthand entries too
+            try:
+                target_dt = dt.datetime.strptime(d_date.strip(), fmt).date()
+                break
+            except Exception:
+                continue
+        if target_dt:
             opens_dt = target_dt - dt.timedelta(days=5)
             if opens_dt > dt.date.today():
-                signups_availability = opens_dt.strftime("%A, %B %-d") + " morning"
+                signups_availability = f"{opens_dt.strftime('%A, %B %-d')}, {CRON_TIME}"
             else:
                 signups_availability = "Soon — check back"
-        except Exception:
+        else:
             signups_availability = "Soon — check back"
 
     master_recs = get_airtable_data("Master List", sort_field="First")
@@ -1433,6 +1441,26 @@ def admin_action():
     if action == "labels" and settings:
         new_date = request.form.get('date')
         new_time = request.form.get('time')
+
+        # Normalize whatever format was typed (shorthand like 9/12/26, or the
+        # full "September 12, 2026") to the one canonical format the rest of
+        # the app — including the Monday/Friday cron's own date parsing —
+        # expects. Without this, a shorthand entry here would silently break
+        # the cron's date-advance logic elsewhere, with no visible error until
+        # the next Monday.
+        parsed = None
+        for fmt in ("%B %d, %Y", "%m/%d/%y", "%m/%d/%Y"):
+            try:
+                parsed = dt.datetime.strptime(new_date.strip(), fmt).date()
+                break
+            except Exception:
+                continue
+        format_warning = ""
+        if parsed:
+            new_date = parsed.strftime("%B %-d, %Y")
+        else:
+            format_warning = " ⚠️ Date format not recognized — saved as typed, but this may break the weekly cron. Use 'Month D, YYYY' (e.g. September 12, 2026)."
+
         patch_fields = {"Target Date": new_date, "Start Time": new_time}
 
         # If the new date is further out than a normal week (>7 days), the
@@ -1442,15 +1470,12 @@ def admin_action():
         # reopening is always a deliberate separate action (the Signups
         # toggle, or the Monday cron itself once it reaches this date).
         auto_closed_note = ""
-        try:
-            parsed = dt.datetime.strptime(new_date, "%B %d, %Y").date()
+        if parsed:
             days_until = (parsed - dt.date.today()).days
             if days_until > 7:
                 patch_fields["Signups Closed"] = True
                 SIGNUPS_CLOSED = True
                 auto_closed_note = " Signups auto-closed until the normal weekly announcement reaches this date."
-        except Exception:
-            pass
 
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
                        json={"fields": patch_fields}, timeout=10)
@@ -1458,7 +1483,7 @@ def admin_action():
         # email (signup confirmations, team summaries, etc.) sees the new date/time
         # right away instead of waiting up to 1 hour for the cache to expire.
         invalidate('Settings')
-        flash(f"Session info updated! Now showing {new_date} at {new_time}.{auto_closed_note}", "success")
+        flash(f"Session info updated! Now showing {new_date} at {new_time}.{auto_closed_note}{format_warning}", "success" if not format_warning else "warning")
     elif action == "toggle_maintenance" and settings:
         current = bool(settings[0]['fields'].get('Maintenance Mode', False))
         new_val = not current
