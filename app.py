@@ -215,6 +215,18 @@ def get_airtable_data(table_name, sort_field=None, direction="asc", filter_formu
         return []
 
 # === SORT KEY for manual roster ordering ===
+def is_maintenance_mode():
+    """True if maintenance mode is on. Checks the in-memory MAINTENANCE_MODE
+    flag (instant, current-process toggles) OR the durable Airtable field
+    (survives Render restarts/cold-starts, which silently reset the in-memory
+    flag back to False). Use this for anything that actually GATES an action —
+    the raw MAINTENANCE_MODE global alone is not reliable across a restart."""
+    if MAINTENANCE_MODE:
+        return True
+    settings = get_airtable_data("Settings")
+    return bool(settings[0]['fields'].get('Maintenance Mode', False)) if settings else False
+
+# === SORT KEY for manual roster ordering ===
 # Records with a "Manual Order" number sort first (ascending).
 # Records without it fall back to Airtable's createdTime (original behavior).
 def sort_key(r):
@@ -637,7 +649,7 @@ def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
 
-    if MAINTENANCE_MODE and not user.get('is_admin'):
+    if is_maintenance_mode() and not user.get('is_admin'):
         flash("Signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
         return redirect(url_for('index'))
 
@@ -1069,7 +1081,7 @@ def team_create():
         flash("Please complete your profile first.", "danger")
         return redirect(url_for('index'))
 
-    if MAINTENANCE_MODE and not user.get('is_admin'):
+    if is_maintenance_mode() and not user.get('is_admin'):
         flash("Team signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
         return redirect(url_for('index'))
 
@@ -1298,7 +1310,7 @@ def maintenance_off():
     flash("✅ Maintenance mode OFF — signups open to everyone.", "success")
     return redirect(url_for('index'))
 
-@app.route('/wipe_signups')
+@app.route('/wipe_signups', methods=['POST'])
 def wipe_signups():
     """Admin-only: delete ALL current Signups without archiving or emailing. Use before restore."""
     user = session.get('user')
@@ -1314,7 +1326,7 @@ def wipe_signups():
         except: pass
     invalidate('Signups')
     log_activity("Admin", f"Wiped {deleted} Signups records (no archive)")
-    flash(f"Cleared {deleted} Signups records. Now run /restore_archive to restore.", "success")
+    flash(f"Cleared {deleted} Signups records (no archive, no emails sent).", "success")
     return redirect(url_for('index'))
 
 
