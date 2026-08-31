@@ -59,6 +59,11 @@
                     🛠 Site Maintenance In Progress — signups paused briefly, back shortly!
                 </div>
                 {% endif %}
+                {% if signups_closed %}
+                <div class="alert alert-danger text-center py-2 mb-2 fw-bold border-danger">
+                    🎾 No Tennis This Week — signups are closed. Check back for the next session date!
+                </div>
+                {% endif %}
                 {% if play_mode == 'Split' %}
                     <div class="alert alert-primary py-2 d-inline-block border-primary shadow-sm mb-2">
                         <h5 class="mb-0 fw-bold">🎾 SPLIT MODE ACTIVE</h5>
@@ -130,6 +135,13 @@
                                         <input type="hidden" name="action" value="toggle_maintenance">
                                         <button class="btn btn-sm w-100 fw-bold {% if maintenance_mode %}btn-danger{% else %}btn-outline-secondary{% endif %}">
                                             🔒 Maintenance: {% if maintenance_mode %}ON — Only You{% else %}OFF{% endif %}
+                                        </button>
+                                    </form>
+
+                                    <form action="/admin_action" method="POST" class="mb-3">
+                                        <input type="hidden" name="action" value="toggle_signups_closed">
+                                        <button class="btn btn-sm w-100 fw-bold {% if signups_closed %}btn-danger{% else %}btn-outline-secondary{% endif %}" title="For a planned no-play week — distinct from Maintenance, shows its own banner site-wide.">
+                                            🎾 Signups: {% if signups_closed %}CLOSED — No Tennis{% else %}OPEN{% endif %}
                                         </button>
                                     </form>
 
