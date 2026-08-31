@@ -145,6 +145,7 @@ AIRTABLE_CACHE = {}
 PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
 MAINTENANCE_MODE = False    # when True, only admin can sign up or create teams
 SIGNUPS_CLOSED = False      # when True, no tennis this week — signups closed, distinct from Maintenance
+_LAST_AVAIL_LOG = 0         # throttles signups-availability fallback logging (see index())
 
 # Per-table cache TTLs — static tables cache longer to reduce API calls
 CACHE_TTL_MAP = {
@@ -281,12 +282,19 @@ def index():
     signups_closed = is_signups_closed()
 
     # "Signups available" display: open now, or an estimate of when they'll
-    # open. Target Date is always a Saturday, and signups normally open the
-    # Monday of that same week (5 days earlier), around when the cron fires
-    # (observed at 8:15 AM in Render's logs) — an estimate based on the
-    # normal weekly rhythm, not a stored/guaranteed value, since reopening
-    # is still a deliberate action (Signups toggle or the Monday cron).
+    # open. Target Date is always a Saturday. Two cases:
+    #  - Target Date is a future date the admin already jumped ahead to
+    #    (skip-ahead scenario) → signups normally open the Monday BEFORE it
+    #    (5 days earlier), matching the normal weekly cadence for whatever
+    #    Saturday is now current.
+    #  - Target Date is still THIS week's (cancelled) Saturday, untouched,
+    #    with signups closed via the toggles instead → that "Monday before"
+    #    is today or already past, so the real reopening is the Monday
+    #    AFTER Target Date (2 days later), when the routine cron actually
+    #    rolls past this cancelled week.
+    # Whichever lands in the future is the right one to show.
     CRON_TIME = "8:15 AM"
+    global _LAST_AVAIL_LOG   # declare at top — Python 3.14 requires this before any use
     if not (maintenance_mode or signups_closed):
         signups_availability = "Now"
     else:
@@ -298,13 +306,24 @@ def index():
             except Exception:
                 continue
         if target_dt:
-            opens_dt = target_dt - dt.timedelta(days=5)
-            if opens_dt > dt.date.today():
+            monday_before = target_dt - dt.timedelta(days=5)
+            monday_after = target_dt + dt.timedelta(days=2)
+            today = dt.date.today()
+            opens_dt = monday_before if monday_before > today else monday_after
+            if opens_dt > today:
                 signups_availability = f"{opens_dt.strftime('%A, %B %-d')}, {CRON_TIME}"
+            elif opens_dt == today:
+                signups_availability = f"Today, {CRON_TIME}"
             else:
                 signups_availability = "Soon — check back"
+                if time.time() - _LAST_AVAIL_LOG > 300:
+                    log_activity("System", f"Signups-availability fallback: opens_dt {opens_dt} not in future (target={d_date!r}, today={today})")
+                    _LAST_AVAIL_LOG = time.time()
         else:
             signups_availability = "Soon — check back"
+            if time.time() - _LAST_AVAIL_LOG > 300:
+                log_activity("System", f"Signups-availability fallback: could not parse Target Date {d_date!r}")
+                _LAST_AVAIL_LOG = time.time()
 
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
