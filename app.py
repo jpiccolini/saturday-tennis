@@ -280,6 +280,24 @@ def index():
     maintenance_mode = is_maintenance_mode()
     signups_closed = is_signups_closed()
 
+    # "Signups available" display: open now, or an estimate of when they'll
+    # open. Target Date is always a Saturday, and signups normally open the
+    # Monday of that same week (5 days earlier) — that's an estimate based on
+    # the normal weekly rhythm, not a stored/guaranteed value, since reopening
+    # is still a deliberate action (Signups toggle or the Monday cron).
+    if not (maintenance_mode or signups_closed):
+        signups_availability = "Now"
+    else:
+        try:
+            target_dt = dt.datetime.strptime(d_date, "%B %d, %Y").date()
+            opens_dt = target_dt - dt.timedelta(days=5)
+            if opens_dt > dt.date.today():
+                signups_availability = opens_dt.strftime("%A, %B %-d") + " morning"
+            else:
+                signups_availability = "Soon — check back"
+        except Exception:
+            signups_availability = "Soon — check back"
+
     master_recs = get_airtable_data("Master List", sort_field="First")
     strike_map = {str(m['fields'].get('Code')): m['fields'].get('Strikes', 0) for m in master_recs}
     signup_recs = sorted(get_airtable_data("Signups"), key=sort_key)
@@ -517,7 +535,7 @@ def index():
                            show_venmo=show_venmo, team_list=team_list, my_team_id=my_team_id,
                            court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
                            pending_teams=pending_teams, maintenance_mode=maintenance_mode,
-                           signups_closed=signups_closed,
+                           signups_closed=signups_closed, signups_availability=signups_availability,
                            gap_week_warning=gap_week_warning, days_until_target=days_until_target,
                            from_email=FROM_EMAIL)
 
@@ -1415,13 +1433,32 @@ def admin_action():
     if action == "labels" and settings:
         new_date = request.form.get('date')
         new_time = request.form.get('time')
+        patch_fields = {"Target Date": new_date, "Start Time": new_time}
+
+        # If the new date is further out than a normal week (>7 days), the
+        # routine Monday cron hasn't had a chance to "catch up" to it yet —
+        # auto-close signups so nobody can sign up early for a date that
+        # hasn't been properly announced. This only ever turns signups OFF;
+        # reopening is always a deliberate separate action (the Signups
+        # toggle, or the Monday cron itself once it reaches this date).
+        auto_closed_note = ""
+        try:
+            parsed = dt.datetime.strptime(new_date, "%B %d, %Y").date()
+            days_until = (parsed - dt.date.today()).days
+            if days_until > 7:
+                patch_fields["Signups Closed"] = True
+                SIGNUPS_CLOSED = True
+                auto_closed_note = " Signups auto-closed until the normal weekly announcement reaches this date."
+        except Exception:
+            pass
+
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
-                       json={"fields": {"Target Date": new_date, "Start Time": new_time}}, timeout=10)
+                       json={"fields": patch_fields}, timeout=10)
         # Bust the Settings cache immediately so every page and every automatic
         # email (signup confirmations, team summaries, etc.) sees the new date/time
         # right away instead of waiting up to 1 hour for the cache to expire.
         invalidate('Settings')
-        flash(f"Session info updated! Now showing {new_date} at {new_time}.", "success")
+        flash(f"Session info updated! Now showing {new_date} at {new_time}.{auto_closed_note}", "success")
     elif action == "toggle_maintenance" and settings:
         current = bool(settings[0]['fields'].get('Maintenance Mode', False))
         new_val = not current
