@@ -160,6 +160,14 @@
                                         </button>
                                     </form>
 
+                                    <form action="/admin_action" method="POST" class="mb-3"
+                                          onsubmit="return confirm('Send the \'Signups OPEN\' email to everyone in the Master List right now? This ignores Signups Closed — use it when the automatic Monday/Friday message was suppressed or missed.');">
+                                        <input type="hidden" name="action" value="send_weekly_email">
+                                        <button class="btn btn-sm w-100 btn-outline-success" title="Manually sends the same weekly signup-open email the Monday cron sends. Ignores Signups Closed.">
+                                            📧 Send Weekly Email Now
+                                        </button>
+                                    </form>
+
                                     <div class="mb-3">
                                         <p class="small text-muted mb-1 fw-bold">Play Mode</p>
                                         {% for mode in ['Open', 'Split', 'Team'] %}
