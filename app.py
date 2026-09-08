@@ -1610,6 +1610,16 @@ def admin_action():
         # expires. A browser hard refresh has no effect on this — it's server
         # memory, not the browser's cache.
         flash("🔄 Data refreshed — the site now reflects the latest Airtable data.", "success")
+    elif action == "send_weekly_email":
+        # Manual trigger for the same "Signups OPEN" / "Reminder" email the
+        # Monday cron sends — for when it was suppressed (Signups Closed was
+        # still on) or just missed. Deliberately ignores Signups Closed: if
+        # you're clicking this, you're explicitly asking it to go out now.
+        ok = send_weekly_signup_email(reminder=False, source="Admin")
+        if ok:
+            flash("📧 Weekly signup email sent.", "success")
+        else:
+            flash("⚠️ Weekly signup email failed to send — check the Logs table for details.", "danger")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
@@ -1941,6 +1951,63 @@ def cron_monday():
     threading.Thread(target=_run_monday_cron, daemon=True).start()
     return "Monday cron started.", 200
 
+def send_weekly_signup_email(reminder=False, source="Cron"):
+    """Send the player-facing 'Signups OPEN' / 'Reminder' email using
+    whatever Settings currently hold (Target Date, Start Time, Play Mode,
+    Week Note, Email Subject override). Shared by the Monday cron and the
+    manual admin trigger, so both produce an identical message. Consumes
+    (clears) Week Note and Email Subject override, same as before this was
+    split out. Returns True/False for success, and always logs the outcome."""
+    invalidate('Settings')
+    settings = get_airtable_data("Settings")
+    d_date = settings[0]['fields'].get('Target Date', 'TBD') if settings else 'TBD'
+    d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
+    play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
+
+    mode_descriptions = {
+        'Open':  "This week we are in <b>Open</b> mode — sign up individually, first come first served across all available courts.",
+        'Split': "This week we are in <b>Split</b> mode, with 3 courts reserved for each skill group. "
+                 "<br><i>(I may shift numbers on Friday to a 4/2 arrangement if sign-ups support it.)</i>",
+        'Team':  "This week we are in <b>Team</b> mode — captains sign up a full court (4 players) and can list reserves. "
+                 "Log in, click <b>Start a Team</b>, and submit your court request. "
+                 "I'll review and approve court assignments before the roster goes live.<br><br>"
+                 "<b>After submitting your team:</b> you should receive a confirmation email within a few minutes. "
+                 "If you don't, something may have gone wrong — contact Jim rather than submitting again.",
+    }
+    mode_explanation = mode_descriptions.get(play_mode, mode_descriptions['Open'])
+
+    week_note = settings[0]['fields'].get('Week Note', '').strip() if settings else ''
+    if week_note:
+        mode_explanation = f"{week_note}<br><br>{mode_explanation}"
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                headers=HEADERS, json={"fields": {"Week Note": ""}})
+        except: pass
+
+    email_subject_override = settings[0]['fields'].get('Email Subject', '').strip() if settings else ''
+    if email_subject_override:
+        try:
+            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+                headers=HEADERS, json={"fields": {"Email Subject": ""}})
+        except: pass
+
+    try:
+        weather_html = get_saturday_weather(d_start)
+        emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
+        subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
+        send_email(emails, subject,
+            f"<h3>{'Reminder' if reminder else 'Signups are open'}!</h3>"
+            f"<p><b>Date:</b> {d_date} &nbsp;|&nbsp; <b>Time:</b> {d_start}</p>"
+            f"{weather_html}"
+            f"<p>{mode_explanation}</p>"
+            f"<p><a href='{SITE_URL}'>{'View the roster' if reminder else 'Claim your spot'}</a></p>",
+            is_multiple=True)
+        log_activity(source, f"Weekly signup email sent for {d_date} (to {len(emails)} recipients)")
+        return True
+    except Exception as e:
+        log_activity("System", f"Weekly signup email failed for {d_date}: {e}")
+        return False
+
 def _run_monday_cron():
     invalidate('Settings')   # always read fresh — Week Note, Skip Next Reset, etc. must not be cached
     settings = get_airtable_data("Settings")
@@ -1965,35 +2032,6 @@ def _run_monday_cron():
                 headers=HEADERS, json={"fields": {"Skip Next Reset": False}})
         except: pass
         log_activity("Cron", f"Monday roster reset skipped for {d_date}")
-
-    mode_descriptions = {
-        'Open':  "This week we are in <b>Open</b> mode — sign up individually, first come first served across all available courts.",
-        'Split': "This week we are in <b>Split</b> mode, with 3 courts reserved for each skill group. "
-                 "<br><i>(I may shift numbers on Friday to a 4/2 arrangement if sign-ups support it.)</i>",
-        'Team':  "This week we are in <b>Team</b> mode — captains sign up a full court (4 players) and can list reserves. "
-                 "Log in, click <b>Start a Team</b>, and submit your court request. "
-                 "I'll review and approve court assignments before the roster goes live.<br><br>"
-                 "<b>After submitting your team:</b> you should receive a confirmation email within a few minutes. "
-                 "If you don't, something may have gone wrong — contact Jim rather than submitting again.",
-    }
-    mode_explanation = mode_descriptions.get(play_mode, mode_descriptions['Open'])
-
-    # Week Note: prepend custom intro, clear after use
-    week_note = settings[0]['fields'].get('Week Note', '').strip() if settings else ''
-    if week_note:
-        mode_explanation = f"{week_note}<br><br>{mode_explanation}"
-        try:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-                headers=HEADERS, json={"fields": {"Week Note": ""}})
-        except: pass
-
-    # Email Subject Override: replaces "Signups OPEN for {date}", clears after use
-    email_subject_override = settings[0]['fields'].get('Email Subject', '').strip() if settings else ''
-    if email_subject_override:
-        try:
-            requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
-                headers=HEADERS, json={"fields": {"Email Subject": ""}})
-        except: pass
 
     signups = get_airtable_data("Signups", sort_field="Created Time")
 
@@ -2062,26 +2100,15 @@ def _run_monday_cron():
         except Exception as _e:
             log_activity("Cron", f"Failed to auto-advance Target Date: {_e}")
 
-    # 4. Send the weekly email (signup-open OR reminder if skip_reset) —
-    # but not at all if this is a declared off-week (Signups Closed). The
-    # admin snapshot above still goes out regardless; this is the
-    # player-facing "come sign up" message specifically.
+    # Send the weekly email (signup-open OR reminder if skip_reset) — but
+    # not at all if this is a declared off-week (Signups Closed). The admin
+    # snapshot above still goes out regardless; this is the player-facing
+    # "come sign up" message specifically.
     if is_signups_closed():
         log_activity("Cron", f"Monday message suppressed — signups closed for {d_date}")
     else:
-        try:
-            weather_html = get_saturday_weather(d_start)
-            emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
-            subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
-            send_email(emails, subject,
-                f"<h3>{'Reminder' if skip_reset else 'Signups are open'}!</h3>"
-                f"<p><b>Date:</b> {d_date} &nbsp;|&nbsp; <b>Time:</b> {d_start}</p>"
-                f"{weather_html}"
-                f"<p>{mode_explanation}</p>"
-                f"<p><a href='{SITE_URL}'>{'View the roster' if skip_reset else 'Claim your spot'}</a></p>",
-                is_multiple=True)
-        except: pass
-        
+        send_weekly_signup_email(reminder=skip_reset, source="Cron")
+
     AIRTABLE_CACHE.clear()
     return "Monday reset, stats calculated, and emails sent successfully.", 200
 
