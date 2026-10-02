@@ -770,10 +770,32 @@ def signup():
 def cancel():
     if not session.get('user'): return redirect(url_for('index'))
     now_mdt = dt.datetime.utcnow() - dt.timedelta(hours=6)
-    is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 8) or (now_mdt.weekday() == 5)
-    
+
     settings = get_airtable_data("Settings")
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
+    d_date = settings[0]['fields'].get('Target Date', '') if settings else ''
+
+    # Late-cancel deadline: the day before Target Date from 8am, through
+    # Target Date itself — derived from the actual play date rather than a
+    # hardcoded Friday/Saturday, so moving play to a different day (e.g.
+    # Sunday for a one-off scheduling conflict) automatically shifts the
+    # cutoff with it. Falls back to the old Friday/Saturday rule only if
+    # Target Date can't be parsed at all.
+    is_past_deadline = False
+    target_dt = None
+    for fmt in ("%B %d, %Y", "%m/%d/%y", "%m/%d/%Y"):
+        try:
+            target_dt = dt.datetime.strptime(d_date.strip(), fmt).date()
+            break
+        except Exception:
+            continue
+    if target_dt:
+        day_before = target_dt - dt.timedelta(days=1)
+        today = now_mdt.date()
+        is_past_deadline = (today == day_before and now_mdt.hour >= 8) or (today >= target_dt)
+    else:
+        is_past_deadline = (now_mdt.weekday() == 4 and now_mdt.hour >= 8) or (now_mdt.weekday() == 5)
+
     recs = get_airtable_data("Signups", sort_field="Created Time")
     
     my_rec = next((r for r in recs if str(r['fields'].get('Player Code')) == str(session['user']['code'])), None)
