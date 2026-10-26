@@ -786,13 +786,25 @@
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0" id="directoryTable">
-                        <thead class="table-light"><tr><th>Name</th><th>Level</th><th>Contact Info</th></tr></thead>
+                        <thead class="table-light"><tr><th>Name</th><th>Level</th><th>Contact Info</th>{% if session.user.get('is_admin') %}<th>On Break</th>{% endif %}</tr></thead>
                         <tbody>
                             {% for p in master_list %}
-                            <tr {% if p.fields.get('Paused') %}class="table-danger"{% endif %}>
-                                <td>{{ p.fields.get('First') }} {{ p.fields.get('Last') }}</td>
+                            <tr {% if p.fields.get('Paused') %}class="table-danger"{% elif p.fields.get('On Break') %}class="table-info"{% endif %}>
+                                <td>{{ p.fields.get('First') }} {{ p.fields.get('Last') }}
+                                    {% if p.fields.get('On Break') %}<span class="badge bg-info text-dark ms-1">On Break</span>{% endif %}
+                                    {% if p.fields.get('Paused') %}<span class="badge bg-danger ms-1">Paused</span>{% endif %}
+                                </td>
                                 <td><span class="badge bg-secondary">{{ p.fields.get('Level', 'Unset') }}</span></td>
                                 <td><small class="text-muted">{{ p.fields.get('Email', 'No Email') }}<br>{{ p.fields.get('Phone', '') }}</small></td>
+                                {% if session.user.get('is_admin') %}
+                                <td>
+                                    <form action="/toggle_break/{{ p.id }}" method="POST" class="m-0 p-0">
+                                        <button type="submit" class="btn btn-sm {% if p.fields.get('On Break') %}btn-info{% else %}btn-outline-secondary{% endif %}" title="Skips this person in Monday/Friday broadcast emails. They can still log in and sign up themselves anytime.">
+                                            {% if p.fields.get('On Break') %}✓ On Break{% else %}Mark On Break{% endif %}
+                                        </button>
+                                    </form>
+                                </td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         </tbody>
