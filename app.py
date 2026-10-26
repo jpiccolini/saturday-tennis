@@ -145,6 +145,7 @@ AIRTABLE_CACHE = {}
 PLAY_MODE_OVERRIDE = None   # set by admin toggle; survives cache expiry within same process
 MAINTENANCE_MODE = False    # when True, only admin can sign up or create teams
 SIGNUPS_CLOSED = False      # when True, no tennis this week — signups closed, distinct from Maintenance
+SEASON_PAUSED = False       # when True, the whole system is off — no known next date, no messaging, site shows TBD
 _LAST_AVAIL_LOG = 0         # throttles signups-availability fallback logging (see index())
 
 # Per-table cache TTLs — static tables cache longer to reduce API calls
@@ -244,6 +245,17 @@ def is_signups_closed():
     settings = get_airtable_data("Settings")
     return bool(settings[0]['fields'].get('Signups Closed', False)) if settings else False
 
+def is_season_paused():
+    """True if the whole system is paused — no known next play date at all
+    (extended cold snap, holiday break, etc). Same durable-check pattern as
+    the other two flags. When this is on: the site shows TBD instead of a
+    date, no Monday/Friday messaging goes out at all, and players can't
+    sign up. Distinct from Signups Closed, which still has a known next date."""
+    if SEASON_PAUSED:
+        return True
+    settings = get_airtable_data("Settings")
+    return bool(settings[0]['fields'].get('Season Paused', False)) if settings else False
+
 # === SORT KEY for manual roster ordering ===
 # Records with a "Manual Order" number sort first (ascending).
 # Records without it fall back to Airtable's createdTime (original behavior).
@@ -277,37 +289,51 @@ def index():
         play_mode = session.pop('forced_play_mode')
         session.modified = True
 
-    # Maintenance mode / signups-closed: read from Airtable (persists across restarts), module var as same-session override
+    # Maintenance mode / signups-closed / season-paused: read from Airtable
+    # (persists across restarts), module var as same-session override
     maintenance_mode = is_maintenance_mode()
     signups_closed = is_signups_closed()
+    season_paused = is_season_paused()
+
+    # Parse Target Date once, tolerating shorthand entries — shared below by
+    # the weather lookup, the "signups available" estimate, the gap-week
+    # warning, and the Season Paused override.
+    target_dt = None
+    for _fmt in ("%B %d, %Y", "%m/%d/%y", "%m/%d/%Y"):
+        try:
+            target_dt = dt.datetime.strptime(d_date.strip(), _fmt).date()
+            break
+        except Exception:
+            continue
+
+    if season_paused:
+        # No known next date — show TBD everywhere and suppress the weather
+        # lookup further down (it relies on target_dt being set).
+        d_date, d_start, d_end = "TBD", "", ""
+        target_dt = None
 
     # "Signups available" display: open now, or an estimate of when they'll
-    # open. Target Date is always a Saturday. Two cases:
+    # open. Two cases, picking whichever lands in the future:
     #  - Target Date is a future date the admin already jumped ahead to
-    #    (skip-ahead scenario) → signups normally open the Monday BEFORE it
-    #    (5 days earlier), matching the normal weekly cadence for whatever
-    #    Saturday is now current.
-    #  - Target Date is still THIS week's (cancelled) Saturday, untouched,
-    #    with signups closed via the toggles instead → that "Monday before"
-    #    is today or already past, so the real reopening is the Monday
-    #    AFTER Target Date (2 days later), when the routine cron actually
-    #    rolls past this cancelled week.
-    # Whichever lands in the future is the right one to show.
+    #    (skip-ahead scenario) → signups normally open the Monday of that
+    #    same week, matching the normal weekly cadence.
+    #  - Target Date is still THIS week's (cancelled) date, untouched, with
+    #    signups closed via the toggles instead → that Monday is today or
+    #    already past, so the real reopening is the following Monday, when
+    #    the routine cron actually rolls past this cancelled week.
+    # Generalized to whatever weekday Target Date actually falls on (not
+    # assumed to always be a Saturday), so a one-off move to e.g. Sunday
+    # doesn't throw this off.
     CRON_TIME = "8:15 AM"
     global _LAST_AVAIL_LOG   # declare at top — Python 3.14 requires this before any use
-    if not (maintenance_mode or signups_closed):
+    if season_paused:
+        signups_availability = "TBD — season paused"
+    elif not (maintenance_mode or signups_closed):
         signups_availability = "Now"
     else:
-        target_dt = None
-        for fmt in ("%B %d, %Y", "%m/%d/%y", "%m/%d/%Y"):  # tolerate shorthand entries too
-            try:
-                target_dt = dt.datetime.strptime(d_date.strip(), fmt).date()
-                break
-            except Exception:
-                continue
         if target_dt:
-            monday_before = target_dt - dt.timedelta(days=5)
-            monday_after = target_dt + dt.timedelta(days=2)
+            monday_before = target_dt - dt.timedelta(days=target_dt.weekday())
+            monday_after = monday_before + dt.timedelta(days=7)
             today = dt.date.today()
             opens_dt = monday_before if monday_before > today else monday_after
             if opens_dt > today:
@@ -411,24 +437,33 @@ def index():
             else:
                 team_list.append(team_data)
 
-    weather_info = "Weather Unavailable"
-    try:
+    weather_info = ""
+    if season_paused:
+        weather_info = "Weather unavailable — season paused"
+    else:
+      weather_info = "Weather Unavailable"
+      try:
         # Open-Meteo - 14-day forecast, Free, No API Key required
         lat, lon = "39.9936", "-105.0897" # Lafayette, CO Coordinates
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=14"
         w_res = requests.get(weather_url).json()
 
-        # Calculate the upcoming Saturday based on today
-        today = dt.date.today()
-        days_ahead = 5 - today.weekday()
-        if days_ahead < 0: days_ahead += 7
-        target_date = today + dt.timedelta(days=days_ahead)
-        target_date_iso = target_date.isoformat() 
-            
+        # Use the actual Target Date when we have it (so a one-off move to a
+        # different day of the week still gets the right forecast). Only
+        # fall back to "upcoming Saturday" if Target Date couldn't be parsed.
+        if target_dt:
+            weather_target_date = target_dt
+        else:
+            today = dt.date.today()
+            days_ahead = 5 - today.weekday()
+            if days_ahead < 0: days_ahead += 7
+            weather_target_date = today + dt.timedelta(days=days_ahead)
+        target_date_iso = weather_target_date.isoformat()
+
         s_hour = start_dt.hour if start_dt else 9
         end_dt = start_dt + timedelta(hours=2, minutes=15) if start_dt else None
         e_hour = min(end_dt.hour, 23) if end_dt else 11
-        
+
         start_time_str = f"{target_date_iso}T{s_hour:02d}:00"
         end_time_str = f"{target_date_iso}T{e_hour:02d}:00"
 
@@ -439,11 +474,11 @@ def index():
         if start_time_str in times:
             s_idx = times.index(start_time_str)
             e_idx = times.index(end_time_str) if end_time_str in times else s_idx + 2
-            
+
             temp_start = int(temps[s_idx])
             temp_end = int(temps[e_idx])
             w_code = codes[s_idx]
-            
+
             # WMO Weather code mapping
             code_map = {
                 0: "Clear", 1: "Mostly Clear", 2: "Partly Cloudy", 3: "Overcast",
@@ -452,13 +487,13 @@ def index():
                 75: "Heavy Snow", 95: "Thunderstorm"
             }
             cond = code_map.get(w_code, "Varied")
-            
+
             end_label = end_dt.strftime('%I:%M %p').lstrip('0') if end_dt else "End"
             weather_info = f"{cond} | {d_start}: {temp_start}°F → {end_label}: {temp_end}°F"
         else:
-            weather_info = "Saturday forecast available soon"
+            weather_info = "Forecast available soon"
 
-    except Exception as e:
+      except Exception as e:
         print(f"Weather Logic Error: {e}")
 
     applicants, guest_requests = [], []
@@ -545,13 +580,10 @@ def index():
     # the Monday cron would purge the roster if left uncorrected.
     gap_week_warning = False
     days_until_target = None
-    try:
-        _target_dt = dt.datetime.strptime(d_date, "%B %d, %Y").date()
-        days_until_target = (_target_dt - dt.date.today()).days
+    if target_dt:
+        days_until_target = (target_dt - dt.date.today()).days
         if days_until_target > 7 and total_signups > 0:
             gap_week_warning = True
-    except (ValueError, AttributeError):
-        pass
 
     return render_template('index.html', target_date=d_date, start_time=d_start, end_time=d_end, roster=roster,
                            applicants=applicants, guest_requests=guest_requests, master_list=master_recs,
@@ -563,6 +595,7 @@ def index():
                            court_map=court_map, lower_court_map=lower_court_map, upper_court_map=upper_court_map,
                            pending_teams=pending_teams, maintenance_mode=maintenance_mode,
                            signups_closed=signups_closed, signups_availability=signups_availability,
+                           season_paused=season_paused,
                            gap_week_warning=gap_week_warning, days_until_target=days_until_target,
                            from_email=FROM_EMAIL)
 
@@ -710,6 +743,10 @@ def logout():
 def signup():
     user = session.get('user')
     if not user: return redirect(url_for('index'))
+
+    if is_season_paused() and not user.get('is_admin'):
+        flash("The season is currently paused — check back once a new date is set.", "warning")
+        return redirect(url_for('index'))
 
     if is_maintenance_mode() and not user.get('is_admin'):
         flash("Signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
@@ -1169,6 +1206,10 @@ def team_create():
         flash("Please complete your profile first.", "danger")
         return redirect(url_for('index'))
 
+    if is_season_paused() and not user.get('is_admin'):
+        flash("The season is currently paused — check back once a new date is set.", "warning")
+        return redirect(url_for('index'))
+
     if is_maintenance_mode() and not user.get('is_admin'):
         flash("Team signups are temporarily paused for maintenance. Check back in a few minutes!", "warning")
         return redirect(url_for('index'))
@@ -1475,7 +1516,7 @@ def restore_archive():
 
 @app.route('/admin_action', methods=['POST'])
 def admin_action():
-    global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE, SIGNUPS_CLOSED   # declare at top — Python 3.14 requires this
+    global PLAY_MODE_OVERRIDE, MAINTENANCE_MODE, SIGNUPS_CLOSED, SEASON_PAUSED   # declare at top — Python 3.14 requires this
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
     action = request.form.get('action')
     settings = get_airtable_data("Settings")
@@ -1518,13 +1559,23 @@ def admin_action():
                 SIGNUPS_CLOSED = True
                 auto_closed_note = " Signups auto-closed until the normal weekly announcement reaches this date."
 
+        # Setting a real next date is how you come back from a Season Pause —
+        # auto-turn it off so the site stops showing TBD and resumes normal
+        # weekly messaging. Reopening is always deliberate (this action), never
+        # automatic any other way.
+        auto_resumed_note = ""
+        if parsed and bool(settings[0]['fields'].get('Season Paused', False)):
+            patch_fields["Season Paused"] = False
+            SEASON_PAUSED = False
+            auto_resumed_note = " Season Paused turned off — back to normal."
+
         requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}", headers=HEADERS,
                        json={"fields": patch_fields}, timeout=10)
         # Bust the Settings cache immediately so every page and every automatic
         # email (signup confirmations, team summaries, etc.) sees the new date/time
         # right away instead of waiting up to 1 hour for the cache to expire.
         invalidate('Settings')
-        flash(f"Session info updated! Now showing {new_date} at {new_time}.{auto_closed_note}{format_warning}", "success" if not format_warning else "warning")
+        flash(f"Session info updated! Now showing {new_date} at {new_time}.{auto_closed_note}{auto_resumed_note}{format_warning}", "success" if not format_warning else "warning")
     elif action == "toggle_maintenance" and settings:
         current = bool(settings[0]['fields'].get('Maintenance Mode', False))
         new_val = not current
@@ -1556,6 +1607,22 @@ def admin_action():
         status = "CLOSED — no tennis this week." if new_val else "OPEN — back to normal."
         flash(f"Signups {status}", "warning" if new_val else "success")
         log_activity("Admin", f"Toggled Signups Closed → {new_val}")
+        return redirect(url_for('index'))
+    elif action == "toggle_season_paused" and settings:
+        current = bool(settings[0]['fields'].get('Season Paused', False))
+        new_val = not current
+        SEASON_PAUSED = new_val   # module-level for current session
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Settings/{settings[0]['id']}",
+            headers=HEADERS, json={"fields": {"Season Paused": new_val}}, timeout=10)
+        for key in list(AIRTABLE_CACHE.keys()):
+            if key.startswith('Settings'):
+                _, records = AIRTABLE_CACHE[key]
+                if records:
+                    records[0]['fields']['Season Paused'] = new_val
+                    AIRTABLE_CACHE[key] = (time.time(), records)
+        status = "PAUSED — site shows TBD, no messages will go out." if new_val else "RESUMED — set a Next Scheduled Date to get back to normal."
+        flash(f"Season {status}", "danger" if new_val else "success")
+        log_activity("Admin", f"Toggled Season Paused → {new_val}")
         return redirect(url_for('index'))
     elif action == "toggle_mode" and settings:
         cycle = {'Open': 'Split', 'Split': 'Team', 'Team': 'Open'}
@@ -2037,6 +2104,10 @@ def _run_monday_cron():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
 
+    if is_season_paused():
+        log_activity("Cron", "Monday reset/message suppressed — season paused")
+        return "Season paused — Monday cron suppressed.", 200
+
     # Skip Next Reset: manual override OR auto-detect bye weeks
     # Auto-detect: if Target Date is more than 7 days away, this is a gap week — never purge
     skip_reset = settings[0]['fields'].get('Skip Next Reset', False) if settings else False
@@ -2146,37 +2217,48 @@ def _run_friday_cron():
     d_start = settings[0]['fields'].get('Start Time', 'TBD') if settings else 'TBD'
     play_mode = settings[0]['fields'].get('Play Mode', 'Open') if settings else 'Open'
 
-    # Declared off-week (Signups Closed): no roster to lock, no message to
-    # send — skip Friday's cron entirely rather than sending either the
-    # normal lock-in emails or the bye-week notice.
-    if is_signups_closed():
-        log_activity("Cron", f"Friday message suppressed — signups closed for {d_date}")
-        return "Signups closed — Friday message suppressed.", 200
+    # Season Paused: no known next date at all — nothing to announce, skip
+    # Friday entirely (same as Monday).
+    if is_season_paused():
+        log_activity("Cron", "Friday message suppressed — season paused")
+        return "Season paused — Friday message suppressed.", 200
 
-    # Bye week: manual flag OR auto-detect (Target Date > 7 days away)
-    skip_friday = settings[0]['fields'].get('Skip Next Reset', False) if settings else False
-    if not skip_friday:
+    # Parse Target Date once, tolerating shorthand entries, so wording below
+    # always reflects the actual play date rather than assuming Saturday.
+    target_dt = None
+    for _fmt in ("%B %d, %Y", "%m/%d/%y", "%m/%d/%Y"):
         try:
-            target = dt.datetime.strptime(d_date, "%B %d, %Y").date()
-            if (target - dt.date.today()).days > 7:
-                skip_friday = True
-                log_activity("Cron", f"Auto-skip Friday: {d_date} is a future session")
-        except: pass
-    if skip_friday:
+            target_dt = dt.datetime.strptime(d_date.strip(), _fmt).date()
+            break
+        except Exception:
+            continue
+    next_play_label = target_dt.strftime('%B %-d') if target_dt else d_date
+    lock_label = (target_dt - dt.timedelta(days=1)).strftime('%B %-d') if target_dt else "the day before"
+
+    # Signups Closed = this is an off week with a known next date (distinct
+    # from Season Paused, where no date is known at all). The usual Friday
+    # message still fires, but with off-week wording: next play date, and
+    # when signups for it open (the Monday of that play date's week), rather
+    # than a roster lock-in.
+    if is_signups_closed():
         master_list = get_airtable_data("Master List")
         all_emails  = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+        if target_dt:
+            signups_open_dt = target_dt - dt.timedelta(days=target_dt.weekday())  # Monday of that week
+            signups_open_label = signups_open_dt.strftime('%B %-d')
+        else:
+            signups_open_label = "soon"
         send_email(all_emails,
-            f"🎾 No tennis this Saturday — see you {d_date}!",
-            f"<p>Hi everyone! Just a quick note: <b>there is no session this Saturday.</b></p>"
-            f"<p>Our next courts are on <b>{d_date} at {d_start}</b>. "
-            f"If you haven't signed up yet, log in and grab your spot — "
-            f"people are already planning ahead.</p>"
-            f"<p><a href='{SITE_URL}'>View the roster</a></p>"
-            f"<p>See you on {d_date}! 🎾</p>",
+            f"🎾 No tennis this week — see you {next_play_label}",
+            f"<p>Hi everyone! Just a quick note: <b>there is no session this week.</b></p>"
+            f"<p>Our next play date is <b>{next_play_label} at {d_start}</b>. "
+            f"Signups for it open <b>{signups_open_label}</b>.</p>"
+            f"<p><a href='{SITE_URL}'>View the site</a></p>"
+            f"<p>See you {next_play_label}! 🎾</p>",
             is_multiple=True)
-        log_activity("Cron", f"Friday bye-week notice sent — next date {d_date}")
-        return "Bye-week notice sent, no lock-in.", 200
-    
+        log_activity("Cron", f"Friday off-week notice sent — next date {next_play_label}, signups open {signups_open_label}")
+        return "Off-week notice sent, no lock-in.", 200
+
     signups = get_airtable_data("Signups", sort_field="Created Time")
     master_list = get_airtable_data("Master List")
     all_emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
@@ -2196,13 +2278,13 @@ def _run_friday_cron():
         # 1. Email Playing
         playing_emails = [r['fields'].get('Email') for r in playing_recs if r['fields'].get('Email')]
         if playing_emails:
-            send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-            
+            send_email(playing_emails, f"🎾 Roster Locked for {next_play_label}", f"<h3>The next play date is {next_play_label}!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: The roster locks on {lock_label} — if you must drop after that, you'll need to find your own sub.</i></p>", is_multiple=True)
+
         # 2. Email Waitlist Individually
         for idx, r in enumerate(waitlist_recs):
             em = r['fields'].get('Email')
             if em:
-                send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(waitlist_recs)}</b> on the Open waitlist.</p><p>Keep an eye out for sub requests! {C} courts are currently reserved.</p>")
+                send_email([em], f"🎾 Waitlist Status for {next_play_label}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster locks on {lock_label} and you are currently <b>{get_ordinal(idx+1)} of {len(waitlist_recs)}</b> on the Open waitlist.</p><p>Keep an eye out for sub requests! {C} courts are currently reserved.</p>")
                 
         # 3. Email Big Picture Blast
         send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend: <b>{big_picture}</b></p><p>If you can play, jump in and help us fill the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
@@ -2235,15 +2317,15 @@ def _run_friday_cron():
         # 1. Email Playing
         playing_emails = [r['fields'].get('Email') for r in (l_play + u_play) if r['fields'].get('Email')]
         if playing_emails:
-            send_email(playing_emails, f"🎾 Roster Locked for {d_date}", f"<h3>You are on the board for tomorrow!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: If you must drop, the late-cancel rules are now in effect.</i></p>", is_multiple=True)
-            
+            send_email(playing_emails, f"🎾 Roster Locked for {next_play_label}", f"<h3>The next play date is {next_play_label}!</h3><p>Start Time: {d_start}</p><p>Check the live roster here: <a href='{SITE_URL}'>{SITE_URL}</a></p><p><i>Note: The roster locks on {lock_label} — if you must drop after that, you'll need to find your own sub.</i></p>", is_multiple=True)
+
         # 2. Email Waitlists Individually
         for idx, r in enumerate(l_wait):
             em = r['fields'].get('Email')
-            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(l_wait)}</b> on the 3.0/3.5 waitlist.</p><p>Keep an eye out for sub requests! {l_cutoff//4} courts are currently reserved for your level.</p>")
+            if em: send_email([em], f"🎾 Waitlist Status for {next_play_label}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster locks on {lock_label} and you are currently <b>{get_ordinal(idx+1)} of {len(l_wait)}</b> on the 3.0/3.5 waitlist.</p><p>Keep an eye out for sub requests! {l_cutoff//4} courts are currently reserved for your level.</p>")
         for idx, r in enumerate(u_wait):
             em = r['fields'].get('Email')
-            if em: send_email([em], f"🎾 Waitlist Status for {d_date}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster is locked and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_cutoff//4} courts are currently reserved for your level.</p>")
+            if em: send_email([em], f"🎾 Waitlist Status for {next_play_label}", f"<h3>You are on the waitlist!</h3><p>Just a heads up, the roster locks on {lock_label} and you are currently <b>{get_ordinal(idx+1)} of {len(u_wait)}</b> on the 4.0/4.5 waitlist.</p><p>Keep an eye out for sub requests! {u_cutoff//4} courts are currently reserved for your level.</p>")
 
         # 3. Email Big Picture Blast
         send_email(all_emails, "🎾 Friday Update: Player slot roundup for this week!", f"<h3>Friday Court Status</h3><p>Here is the big picture for this weekend:</p><p><b>{big_picture}</b></p><p>If you can play, jump in and help us fill out the next court: <a href='{SITE_URL}'>{SITE_URL}</a></p>", is_multiple=True)
@@ -2284,3 +2366,4 @@ def admin_remove_player():
 
 if __name__ == '__main__':
     app.run(debug=True)
+    
