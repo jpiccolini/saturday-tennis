@@ -1712,6 +1712,33 @@ def admin_action():
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
+@app.route('/toggle_break/<record_id>', methods=['POST'])
+def toggle_break(record_id):
+    """Admin-only: flip a Master List member's 'On Break' flag. On Break
+    members are skipped in the three broadcast sends (Monday signup-open,
+    Friday off-week notice, Friday big-picture blast) but are never blocked
+    from logging in and signing up themselves — distinct from the
+    strikes-based 'Paused' field, which does block signups."""
+    if not session.get('user') or not session['user'].get('is_admin'):
+        return "Unauthorized", 403
+    master = get_airtable_data("Master List")
+    rec = next((m for m in master if m['id'] == record_id), None)
+    if not rec:
+        flash("Player not found.", "danger")
+        return redirect(url_for('index'))
+    new_val = not bool(rec['fields'].get('On Break', False))
+    name = f"{rec['fields'].get('First','')} {rec['fields'].get('Last','')}".strip()
+    try:
+        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Master%20List/{record_id}",
+            headers=HEADERS, json={"fields": {"On Break": new_val}}, timeout=10)
+        invalidate('Master List')
+        log_activity("Admin", f"Toggled On Break for {name} → {new_val}")
+        note = "is now ON BREAK — skipped in weekly emails, can still sign up anytime" if new_val else "is back from break — weekly emails resume"
+        flash(f"{name} {note}.", "success")
+    except Exception as e:
+        flash(f"Update failed: {e}", "danger")
+    return redirect(url_for('index'))
+
 @app.route('/move_player/<signup_id>', methods=['POST'])
 def move_player(signup_id):
     if not session.get('user') or not session['user'].get('is_admin'): return "Unauthorized", 403
@@ -2035,6 +2062,15 @@ def get_ordinal(n):
     if 11 <= (n % 100) <= 13: return str(n) + 'th'
     return str(n) + {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
 
+def master_list_emails(master_list):
+    """Email addresses for broadcast sends (Monday signup-open, Friday
+    off-week notice, Friday big-picture blast) — excludes anyone marked
+    'On Break' in Master List. Distinct from the strikes-based 'Paused'
+    field: On Break just means 'leave me alone for now', not 'blocked' —
+    they can still log in and sign up themselves any week they want to."""
+    return [m['fields'].get('Email') for m in master_list
+            if m['fields'].get('Email') and not m['fields'].get('On Break')]
+
 @app.route('/cron/monday')
 def cron_monday():
     threading.Thread(target=_run_monday_cron, daemon=True).start()
@@ -2082,7 +2118,7 @@ def send_weekly_signup_email(reminder=False, source="Cron"):
 
     try:
         weather_html = get_saturday_weather(d_start)
-        emails = [m['fields'].get('Email') for m in get_airtable_data("Master List") if m['fields'].get('Email')]
+        emails = master_list_emails(get_airtable_data("Master List"))
         subject = email_subject_override or f"🎾 Signups OPEN for {d_date}!"
         send_email(emails, subject,
             f"<h3>{'Reminder' if reminder else 'Signups are open'}!</h3>"
@@ -2242,7 +2278,7 @@ def _run_friday_cron():
     # than a roster lock-in.
     if is_signups_closed():
         master_list = get_airtable_data("Master List")
-        all_emails  = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
+        all_emails  = master_list_emails(master_list)
         if target_dt:
             signups_open_dt = target_dt - dt.timedelta(days=target_dt.weekday())  # Monday of that week
             signups_open_label = signups_open_dt.strftime('%B %-d')
@@ -2261,8 +2297,8 @@ def _run_friday_cron():
 
     signups = get_airtable_data("Signups", sort_field="Created Time")
     master_list = get_airtable_data("Master List")
-    all_emails = [m['fields'].get('Email') for m in master_list if m['fields'].get('Email')]
-    
+    all_emails = master_list_emails(master_list)
+
     if play_mode == 'Open':
         total = len(signups)
         playing_cutoff = (min(total, 24) // 4) * 4
@@ -2366,4 +2402,3 @@ def admin_remove_player():
 
 if __name__ == '__main__':
     app.run(debug=True)
-    
