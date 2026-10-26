@@ -55,12 +55,15 @@
             </div>
             
             <div class="mt-1">
-                {% if maintenance_mode %}
+                {% if season_paused %}
+                <div class="alert alert-secondary text-center py-2 mb-2 fw-bold border-dark" style="background:#e2e3e5;">
+                    🥶 Season Paused — no next date set yet. Check back once play resumes!
+                </div>
+                {% elif maintenance_mode %}
                 <div class="alert alert-warning text-center py-2 mb-2 fw-bold border-warning">
                     🛠 Site Maintenance In Progress — signups paused briefly, back shortly!
                 </div>
-                {% endif %}
-                {% if signups_closed %}
+                {% elif signups_closed %}
                 <div class="alert alert-danger text-center py-2 mb-2 fw-bold border-danger">
                     🎾 No Tennis This Week — signups are closed. Check back for the next session date!
                 </div>
@@ -146,6 +149,14 @@
                                         </button>
                                     </form>
 
+                                    <form action="/admin_action" method="POST" class="mb-3"
+                                          onsubmit="return {% if season_paused %}true{% else %}confirm('Pause the whole season? The site will show TBD, no Monday/Friday messages will go out, and signups will be blocked until you set a new date.'){% endif %};">
+                                        <input type="hidden" name="action" value="toggle_season_paused">
+                                        <button class="btn btn-sm w-100 fw-bold {% if season_paused %}btn-dark{% else %}btn-outline-secondary{% endif %}" title="For an extended cold snap or holiday break with no known next date — turns off messaging entirely until you set one.">
+                                            🥶 Season: {% if season_paused %}PAUSED — Everything Off{% else %}Active{% endif %}
+                                        </button>
+                                    </form>
+
                                     <form action="/admin_action" method="POST" class="mb-3">
                                         <input type="hidden" name="action" value="refresh_cache">
                                         <button class="btn btn-sm w-100 btn-outline-primary" title="Use after editing Airtable directly — a browser refresh alone won't pick up the change.">
@@ -207,8 +218,8 @@
                                     <form action="/admin_action" method="POST">
                                         <input type="hidden" name="action" value="labels">
                                         <label class="small text-muted mb-0">Date</label>
-                                        <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ target_date }}"
-                                               title="Format: Month D, YYYY (e.g. September 12, 2026). If this is more than a week out, signups auto-close until the normal weekly announcement catches up.">
+                                        <input type="text" name="date" class="form-control form-control-sm mb-1" value="{{ '' if season_paused else target_date }}"
+                                               title="Format: Month D, YYYY (e.g. September 12, 2026). If this is more than a week out, signups auto-close until the normal weekly announcement catches up. Setting a date here also turns off Season Paused automatically.">
                                         <label class="small text-muted mb-0">Time</label>
                                         <input type="text" name="time" class="form-control form-control-sm mb-2" value="{{ start_time }}">
                                         <button class="btn btn-sm btn-outline-dark w-100 mb-2">Update Info</button>
