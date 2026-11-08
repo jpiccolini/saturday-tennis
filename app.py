@@ -928,7 +928,7 @@ def apply():
 def request_guest():
     user = session.get('user')
     if not user or not user.get('contact_confirmed'): return redirect(url_for('index'))
-    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Sponsor": f"{user['first']} {user['last']}", "Status": "Pending", "Level": user.get('level', '')}})
+    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Applicants", headers=HEADERS, json={"fields": {"First": request.form.get('guest_first'), "Last": request.form.get('guest_last'), "Email": request.form.get('guest_email', ''), "Sponsor": f"{user['first']} {user['last']}", "Sponsor Email": user.get('email', ''), "Status": "Pending", "Level": user.get('level', '')}})
     flash("Guest request submitted to Admin. They will be placed in your play level.", "info")
     return redirect(url_for('index'))
 
@@ -1779,7 +1779,45 @@ def approve_guest(app_id):
     f = res.get('fields', {})
     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Signups", headers=HEADERS, json={"fields": {"First": f.get('First'), "Last": f.get('Last'), "Player Code": "GUEST", "Label": f"GUEST of {f.get('Sponsor')}", "Level": f.get('Level')}})
     requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Applicants/{app_id}", headers=HEADERS, json={"fields": {"Status": "Approved"}})
-    flash(f"Guest added to roster!", "success")
+
+    # Notify both the guest (they're playing) and the sponsor (so they know
+    # their request went through) — guests have no login code of their own,
+    # so their email is just a confirmation, not a credential.
+    sponsor_email = f.get('Sponsor Email', '')
+    guest_email   = f.get('Email', '')
+    guest_name    = f"{f.get('First','')} {f.get('Last','')}".strip()
+    sponsor_first = f.get('Sponsor','').split(' ')[0] if f.get('Sponsor') else ''
+
+    notified = []
+    if guest_email or sponsor_email:
+        settings = get_airtable_data("Settings")
+        d_date  = settings[0]['fields'].get('Target Date', 'this week') if settings else 'this week'
+        d_start = settings[0]['fields'].get('Start Time', '') if settings else ''
+
+    if guest_email:
+        send_email(guest_email, "🎾 You're Confirmed to Play!",
+            f"<p>Hi {f.get('First','')}!</p>"
+            f"<p>{f.get('Sponsor','a Saturday Tennis Gang member')} has you confirmed as a guest on the roster "
+            f"for <b>{d_date}</b>{f' at <b>{d_start}</b>' if d_start else ''}.</p>"
+            f"<p>You can view the roster anytime at <a href='{SITE_URL}'>{SITE_URL}</a> — no login needed for this.</p>"
+            f"<p>See you there! 🎾</p>")
+        notified.append('guest')
+
+    if sponsor_email:
+        send_email(sponsor_email, "🎾 Your Guest Has Been Approved!",
+            f"<p>Hi {sponsor_first}!</p>"
+            f"<p>Your guest <b>{guest_name}</b> has been approved and added to the roster for <b>{d_date}</b>"
+            f"{f' at <b>{d_start}</b>' if d_start else ''}.{' They have been emailed directly as well.' if guest_email else ' No email was on file for them, so please let them know yourself.'}</p>"
+            f"<p>Check the roster at <a href='{SITE_URL}'>{SITE_URL}</a>.</p>")
+        notified.append('sponsor')
+
+    note = {
+        ('guest', 'sponsor'): ' Guest and sponsor both notified.',
+        ('guest',): ' Guest notified (no sponsor email on file).',
+        ('sponsor',): ' Sponsor notified (no guest email on file — ask them to let their guest know).',
+        (): ' No email on file for guest or sponsor — let them know yourself.',
+    }[tuple(notified)]
+    flash(f"Guest added to roster!{note}", "success")
     AIRTABLE_CACHE.clear()
     return redirect(url_for('index'))
 
